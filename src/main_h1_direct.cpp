@@ -404,6 +404,7 @@ int main(int argc, char** argv) {
 
     try {
         h1if::RuntimeConfig cfg = h1if::loadRuntimeConfig(argv[1]);
+        cfg.log_path = h1if::resolveLogPath(cfg);
 
         std::cout << "WARNING: use only with H1 suspended, lying safely, or mechanically protected.\n"
                   << "WARNING: verify joint_id, motor mode, limits, and emergency stop before enabling.\n"

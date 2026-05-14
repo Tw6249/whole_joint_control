@@ -4,7 +4,18 @@
       "Bash(Get-ChildItem *)",
       "Bash(gh --version)",
       "Bash(git rm *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git config *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(git fetch *)",
+      "Bash(cmake -B build-h1 -S .)",
+      "Bash(Remove-Item -Recurse -Force build-h1 -ErrorAction SilentlyContinue)",
+      "Bash(cmake --build build-h1)",
+      "Bash(build-h1\\\\Debug\\\\h1_mock_closed_loop.exe config/h1_right_knee.yaml 5.0)",
+      "Bash(./build-h1/Debug/h1_mock_closed_loop.exe config/h1_right_knee.yaml 5.0)",
+      "Bash(python scripts/plot_eid_log.py data/20260514_154943/h1_mock_log.csv)"
     ]
   }
 }

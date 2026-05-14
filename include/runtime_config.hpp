@@ -2,14 +2,22 @@
 
 #include "safety.hpp"
 
+#include <chrono>
 #include <cctype>
 #include <cmath>
+#include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
 namespace h1if {
+
+enum class ReferenceMode {
+    OpenLoop,
+    ClosedLoop,
+};
 
 struct EidControllerConfig {
     int target_joint = 2;
@@ -18,8 +26,10 @@ struct EidControllerConfig {
     double observer_gain_q = 0.9;
     double observer_gain_dq = 1.1;
     double filter_alpha = 0.3;
+    ReferenceMode reference_mode = ReferenceMode::OpenLoop;
     double control_dt = 0.002;
     double policy_reference_dt = 0.05;
+    double closed_loop_reference_tau = 0.05;
     double ref_center = 0.75;
     double ref_amplitude = 0.75;
     double ref_frequency = 0.05;
@@ -53,7 +63,7 @@ struct RuntimeConfig {
     SafetyConfig safety;
     EidControllerConfig controller;
     PlantModelConfig plant;
-    std::string log_path = "h1_mock_log.csv";
+    std::string log_path = "data/h1_mock_log.csv";
 };
 
 inline std::string trim(std::string s) {
@@ -103,6 +113,27 @@ inline int toInt(const std::string& value) {
     return std::stoi(value, nullptr, 0);
 }
 
+inline std::string normalizeToken(std::string value) {
+    for (char& ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (ch == '-') {
+            ch = '_';
+        }
+    }
+    return value;
+}
+
+inline ReferenceMode parseReferenceMode(const std::string& value) {
+    const std::string token = normalizeToken(trim(value));
+    if (token == "open_loop" || token == "openloop" || token == "open") {
+        return ReferenceMode::OpenLoop;
+    }
+    if (token == "closed_loop" || token == "closedloop" || token == "closed") {
+        return ReferenceMode::ClosedLoop;
+    }
+    throw std::runtime_error("controller.reference_mode must be open_loop or closed_loop");
+}
+
 inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
     const auto finite = [](double v) {
         return std::isfinite(v);
@@ -123,6 +154,10 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
     }
     if (cfg.controller.policy_reference_dt <= 0.0 || !finite(cfg.controller.policy_reference_dt)) {
         throw std::runtime_error("controller.policy_reference_dt must be positive and finite");
+    }
+    if (cfg.controller.closed_loop_reference_tau <= 0.0 ||
+        !finite(cfg.controller.closed_loop_reference_tau)) {
+        throw std::runtime_error("controller.closed_loop_reference_tau must be positive and finite");
     }
     if (cfg.controller.startup_ramp_duration < 0.0 ||
         cfg.controller.eid_tau_limit <= 0.0 ||
@@ -148,6 +183,23 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
             throw std::runtime_error("joint limit has invalid range");
         }
     }
+}
+
+inline std::string resolveLogPath(const RuntimeConfig& cfg) {
+    namespace fs = std::filesystem;
+    const auto now = std::chrono::system_clock::now();
+    const auto t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm;
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", &tm);
+
+    fs::path p(cfg.log_path);
+    return (p.parent_path() / buf / p.filename()).string();
 }
 
 inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
@@ -206,7 +258,9 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             else if (key == "observer_gain_q") cfg.controller.observer_gain_q = toDouble(value);
             else if (key == "observer_gain_dq") cfg.controller.observer_gain_dq = toDouble(value);
             else if (key == "filter_alpha") cfg.controller.filter_alpha = toDouble(value);
+            else if (key == "reference_mode") cfg.controller.reference_mode = parseReferenceMode(value);
             else if (key == "policy_reference_dt") cfg.controller.policy_reference_dt = toDouble(value);
+            else if (key == "closed_loop_reference_tau") cfg.controller.closed_loop_reference_tau = toDouble(value);
             else if (key == "ref_center") cfg.controller.ref_center = toDouble(value);
             else if (key == "ref_amplitude") cfg.controller.ref_amplitude = toDouble(value);
             else if (key == "ref_frequency") cfg.controller.ref_frequency = toDouble(value);

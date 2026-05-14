@@ -58,7 +58,8 @@ public:
         const double dt = cfg_.control_dt;
 
         const JointReferencePair raw_ref = reference_.sample(t, dt);
-        const JointReferencePair ref = shapeStartupReference(raw_ref, t, dt);
+        const JointReferencePair ramped_ref = shapeStartupReference(raw_ref, t, dt);
+        const JointReferencePair ref = shapeReferenceForMode(ramped_ref, q, dq, dt);
         const StepResult result = controllerStep(q, dq, ref, dt);
 
         auto& c = command.joint[j];
@@ -225,6 +226,24 @@ private:
         shaped.next.q = q_start_ + an * (raw.next.q - q_start_);
         shaped.next.dq = (1.0 - an) * dq_start_ + an * raw.next.dq + adotn * (raw.next.q - q_start_);
         return shaped;
+    }
+
+    JointReferencePair shapeReferenceForMode(const JointReferencePair& ramped,
+                                             double q,
+                                             double dq,
+                                             double dt) const {
+        if (cfg_.reference_mode == ReferenceMode::OpenLoop) {
+            return ramped;
+        }
+
+        JointReferencePair closed = ramped;
+        const double alpha =
+            clamp(dt / std::max(cfg_.closed_loop_reference_tau, dt), 0.0, 1.0);
+        closed.now.q = q;
+        closed.now.dq = dq;
+        closed.next.q = q + alpha * (ramped.next.q - q);
+        closed.next.dq = dq + alpha * (ramped.next.dq - dq);
+        return closed;
     }
 
     double limitTorqueCommand(double tau, double dt) {

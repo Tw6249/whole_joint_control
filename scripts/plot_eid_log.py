@@ -154,22 +154,28 @@ def summarize(rows):
 
 def main():
     parser = argparse.ArgumentParser(description="Plot H1 EID CSV log reference and measured knee state.")
-    parser.add_argument("log", nargs="?", default="h1_mock_log.csv", type=Path)
-    parser.add_argument("--out", default="h1_eid_latest_plot.png", type=Path)
-    parser.add_argument("--clean-csv", default="h1_eid_latest_clean.csv", type=Path)
+    parser.add_argument("log", nargs="?", default="data/h1_mock_log.csv", type=Path)
+    parser.add_argument("--out", default=None, type=Path,
+                        help="Output plot path (default: same dir as log / h1_eid_latest_plot.png)")
+    parser.add_argument("--clean-csv", default=None, type=Path,
+                        help="Output clean CSV path (default: same dir as log / h1_eid_latest_clean.csv)")
     args = parser.parse_args()
 
+    log_dir = args.log.parent
+    out_path = args.out if args.out is not None else log_dir / "h1_eid_latest_plot.png"
+    clean_csv_path = args.clean_csv if args.clean_csv is not None else log_dir / "h1_eid_latest_clean.csv"
+
     rows = load_rows(args.log)
-    write_clean_csv(rows, args.clean_csv)
-    plot_rows(rows, args.out)
+    write_clean_csv(rows, clean_csv_path)
+    plot_rows(rows, out_path)
 
     for key, value in summarize(rows).items():
         if isinstance(value, float):
             print(f"{key}={value:.6f}")
         else:
             print(f"{key}={value}")
-    print(f"clean_csv={args.clean_csv}")
-    print(f"plot={args.out}")
+    print(f"clean_csv={clean_csv_path}")
+    print(f"plot={out_path}")
 
 
 if __name__ == "__main__":

@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
         if (argc >= 3) {
             cfg.mock_duration = std::atof(argv[2]);
         }
+        cfg.log_path = h1if::resolveLogPath(cfg);
 
         const int joint_id = cfg.controller.target_joint;
         const double dt = cfg.control_dt;

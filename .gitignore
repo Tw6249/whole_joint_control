@@ -18,6 +18,9 @@ Makefile
 # Test artifacts
 Testing/Temporary/
 
+# Run outputs
+data/
+
 # OS files
 .DS_Store
 Thumbs.db

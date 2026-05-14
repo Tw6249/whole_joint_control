@@ -3,7 +3,7 @@ domain_id: 0
 network_interface: eth0
 control_dt: 0.002
 mock_duration: 5.0
-log_path: h1_mock_log.csv
+log_path: data/h1_mock_log.csv
 
 safe_hold:
   kp: 10.0
@@ -17,7 +17,9 @@ controller:
   observer_gain_q: 0.25
   observer_gain_dq: 0.25
   filter_alpha: 0.5
+  reference_mode: open_loop  # open_loop keeps the existing time-based reference; closed_loop re-anchors reference to measured q/dq each cycle.
   policy_reference_dt: 0.05
+  closed_loop_reference_tau: 0.05
   ref_center: 0.75
   ref_amplitude: 0.55
   ref_frequency: 0.8

@@ -1,3 +1,4 @@
+#include "runtime_config.hpp"
 #include "safety.hpp"
 
 #include <cassert>
@@ -82,6 +83,9 @@ int main() {
     assert(h1if::h1MotorMode(10) == 0x0A);
     assert(h1if::h1MotorMode(11) == 0x0A);
     assert(h1if::h1MotorMode(12) == 0x01);
+
+    assert(h1if::parseReferenceMode("open_loop") == h1if::ReferenceMode::OpenLoop);
+    assert(h1if::parseReferenceMode("closed-loop") == h1if::ReferenceMode::ClosedLoop);
 
     std::cout << "h1_safety_tests passed\n";
     return 0;

@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -36,6 +37,11 @@ public:
     }
 
     bool start(const std::string& path) {
+        std::error_code ec;
+        const auto parent = std::filesystem::path(path).parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent, ec);
+        }
         out_.open(path, std::ios::out | std::ios::trunc);
         if (!out_) {
             return false;
