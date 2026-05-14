@@ -1,0 +1,23 @@
+# Build outputs
+build-h1/
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.user
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# Test artifacts
+Testing/Temporary/
+
+# OS files
+.DS_Store
+Thumbs.db

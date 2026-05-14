@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem *)",
+      "Bash(gh --version)",
+      "Bash(git rm *)",
+      "Bash(git add *)"
+    ]
+  }
+}
