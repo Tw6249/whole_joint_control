@@ -96,13 +96,15 @@ private:
                 dq0 = plan_.dq_nodes[last];
                 ddq0 = plan_.ddq_nodes[last];
             } else {
-                const JointReference raw0 = rawPolicyReference(segment_start, t_policy);
-                q0 = raw0.q;
-                dq0 = raw0.dq;
+                q0 = rawPolicyPosition(segment_start, t_policy);
             }
 
-            const JointReference target = rawPolicyReference(segment_start + t_policy, t_policy);
-            buildQuinticPlanNodes(q0, dq0, ddq0, target.q, target.dq, 0.0, ts, t_policy);
+            const double q1 = rawPolicyPosition(segment_start + t_policy, t_policy);
+            const double dq_segment = (q1 - q0) / t_policy;
+            if (!plan_.initialized || segment != plan_.last_segment + 1.0) {
+                dq0 = dq_segment;
+            }
+            buildQuinticPlanNodes(q0, dq0, ddq0, q1, dq_segment, 0.0, ts, t_policy);
 
             plan_.initialized = true;
             plan_.last_segment = segment;
@@ -176,28 +178,17 @@ private:
         return r;
     }
 
-    JointReference rawPolicyReference(double t, double t_policy) const {
+    double rawPolicyPosition(double t, double t_policy) const {
         t = std::max(t, 0.0);
         const double policy_index = std::floor((t + 1.0e-12) / t_policy);
         const double t0 = policy_index * t_policy;
-        const double q0 = policyPosition(t0);
-
-        JointReference r;
-        r.q = q0;
-        r.dq = policyVelocity(t0);
-        return r;
+        return policyPosition(t0);
     }
 
     double policyPosition(double t) const {
         constexpr double pi = 3.14159265358979323846;
         return cfg_.center +
                cfg_.amplitude * std::sin(2.0 * pi * cfg_.frequency * t + cfg_.phase);
-    }
-
-    double policyVelocity(double t) const {
-        constexpr double pi = 3.14159265358979323846;
-        const double omega = 2.0 * pi * cfg_.frequency;
-        return cfg_.amplitude * omega * std::cos(omega * t + cfg_.phase);
     }
 
     static void evalQuintic(double q0,
