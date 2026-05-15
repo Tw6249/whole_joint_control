@@ -21,6 +21,10 @@ Testing/Temporary/
 # Run outputs
 data/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # OS files
 .DS_Store
 Thumbs.db

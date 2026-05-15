@@ -140,7 +140,7 @@ class H1KneePidRuntime {
 public:
     H1KneePidRuntime(h1if::RuntimeConfig cfg, const CliOptions& opts)
         : cfg_(std::move(cfg)),
-          joint_id_(cfg_.controller.target_joint),
+          joint_id_(h1if::primaryEidJoint(cfg_)),
           target_q_(opts.target_q),
           run_seconds_(opts.run_seconds),
           kp_(opts.kp),
@@ -182,7 +182,7 @@ public:
 
         std::cout << std::fixed << std::setprecision(6)
                   << "h1_knee_pid armed\n"
-                  << "joint_id=" << joint_id_
+                  << "joint_id=" << joint_id_ << " (primary eid_controllers joint)"
                   << " start_q=" << start_q_
                   << " target_q=" << target_q_
                   << " run_seconds=" << run_seconds_
@@ -661,10 +661,10 @@ void printUsage(const char* argv0) {
               << "  sudo " << argv0 << " <config.yaml> <center_q_rad> <run_seconds> --arm --sine "
               << "--amp RAD --freq HZ [--kp K] [--ki K] [--kd K] [--tau-limit N_M] [--speed RAD_S]\n\n"
               << "Example, stronger but still capped first bring-up:\n"
-              << "  sudo " << argv0 << " config/h1_right_knee.yaml 0.55 8 --arm "
+              << "  sudo " << argv0 << " config/h1_full_body_real_template.yaml 0.55 8 --arm "
               << "--kp 30 --ki 1 --kd 3 --tau-limit 12 --speed 0.15\n\n"
               << "Example sine around 0.90 rad with 0.35 rad amplitude:\n"
-              << "  sudo " << argv0 << " config/h1_right_knee.yaml 0.90 30 --arm --sine "
+              << "  sudo " << argv0 << " config/h1_full_body_real_template.yaml 0.90 30 --arm --sine "
               << "--amp 0.35 --freq 0.08 --kp 30 --ki 1 --kd 3 --tau-limit 12 --speed 0.30\n\n"
               << "Safety constraints built into this first bring-up executable:\n"
               << "  target must be inside YAML joint limits by 0.03 rad\n"

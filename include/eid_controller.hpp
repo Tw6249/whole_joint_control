@@ -7,20 +7,29 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace h1if {
 
-class EidSingleJointController final : public IController {
+class EidJointController final {
 public:
-    EidSingleJointController(EidControllerConfig cfg, PlantModelConfig model)
-        : cfg_(cfg), model_(model), reference_(makeReferenceConfig(cfg, model)) {}
+    explicit EidJointController(JointEidConfig cfg)
+        : cfg_(std::move(cfg)),
+          reference_(makeReferenceConfig(cfg_.controller, cfg_.plant)) {}
 
-    std::string name() const override {
-        return "EidSingleJointController";
+    int jointId() const {
+        return cfg_.controller.target_joint;
     }
 
-    void reset(const RobotState& state) override {
-        const int j = cfg_.target_joint;
+    const JointEidConfig& config() const {
+        return cfg_;
+    }
+
+    void reset(const RobotState& state) {
+        const int j = jointId();
         t0_ = state.t;
         x_hat_q_ = 0.0;
         x_hat_dq_ = 0.0;
@@ -31,31 +40,21 @@ public:
         q_start_ = state.joint[j].q;
         dq_start_ = state.joint[j].dq;
         last_tau_ = 0.0;
-        reference_.configure(makeReferenceConfig(cfg_, model_));
+        reference_.configure(makeReferenceConfig(cfg_.controller, cfg_.plant));
         reference_.reset();
         initialized_ = true;
     }
 
-    void step(const RobotState& state, RobotCommand& command, ControllerDebug& debug) override {
+    void stepJoint(const RobotState& state, RobotCommand& command, ControllerDebug& debug) {
         if (!initialized_) {
             reset(state);
         }
 
-        for (int i = 0; i < kMaxMotors; ++i) {
-            command.joint[i].mode = h1MotorMode(i);
-            command.joint[i].q = static_cast<float>(state.joint[i].q);
-            command.joint[i].dq = 0.0f;
-            command.joint[i].kp = static_cast<float>(cfg_.torque_safe_kp);
-            command.joint[i].kd = static_cast<float>(cfg_.torque_safe_kd);
-            command.joint[i].tau = 0.0f;
-            command.joint[i].enable = true;
-        }
-
-        const int j = cfg_.target_joint;
+        const int j = jointId();
         const double q = state.joint[j].q;
         const double dq = state.joint[j].dq;
         const double t = state.t - t0_;
-        const double dt = cfg_.control_dt;
+        const double dt = cfg_.controller.control_dt;
 
         const JointReferencePair raw_ref = reference_.sample(t, dt);
         const JointReferencePair ramped_ref = shapeStartupReference(raw_ref, t, dt);
@@ -66,38 +65,44 @@ public:
         c.mode = h1MotorMode(j);
         c.q = static_cast<float>(q);
         c.dq = 0.0f;
-        c.kp = static_cast<float>(cfg_.torque_safe_kp);
-        c.kd = static_cast<float>(cfg_.torque_safe_kd);
+        c.kp = static_cast<float>(cfg_.controller.torque_safe_kp);
+        c.kd = static_cast<float>(cfg_.controller.torque_safe_kd);
         c.tau = static_cast<float>(result.u_t);
+        c.enable = true;
 
-        debug.data[0] = ref.now.q;
-        debug.data[1] = ref.now.dq;
-        debug.data[2] = q;
-        debug.data[3] = dq;
-        debug.data[4] = ref.now.q - q;
-        debug.data[5] = ref.now.dq - dq;
-        debug.data[6] = result.u_star;
-        debug.data[7] = result.u_feedback;
-        debug.data[8] = result.u_t;
-        debug.data[9] = result.eta_q;
-        debug.data[10] = result.eta_dq;
-        debug.data[11] = result.x_hat_q;
-        debug.data[12] = result.x_hat_dq;
-        debug.data[13] = result.rho_q;
-        debug.data[14] = result.rho_dq;
-        debug.data[15] = result.x_bar_q;
-        debug.data[16] = ref.next.q;
-        debug.data[17] = ref.next.dq;
-        debug.data[18] = result.x_bar_dq;
-        debug.data[19] = result.r_d_q;
-        debug.data[20] = result.r_d_dq;
-        debug.data[21] = result.e_q;
-        debug.data[22] = result.e_dq;
-        debug.data[23] = result.observer_qacc;
-        debug.data[24] = result.observer_tau_applied;
-        debug.data[25] = result.u_raw;
-        debug.data[26] = raw_ref.now.q;
-        debug.data[27] = raw_ref.now.dq;
+        auto& jd = debug.joint[j].data;
+        jd[0] = ref.now.q;
+        jd[1] = ref.now.dq;
+        jd[2] = q;
+        jd[3] = dq;
+        jd[4] = ref.now.q - q;
+        jd[5] = ref.now.dq - dq;
+        jd[6] = result.u_star;
+        jd[7] = result.u_feedback;
+        jd[8] = result.u_t;
+        jd[9] = result.eta_q;
+        jd[10] = result.eta_dq;
+        jd[11] = result.x_hat_q;
+        jd[12] = result.x_hat_dq;
+        jd[13] = result.rho_q;
+        jd[14] = result.rho_dq;
+        jd[15] = result.x_bar_q;
+        jd[16] = ref.next.q;
+        jd[17] = ref.next.dq;
+        jd[18] = result.x_bar_dq;
+        jd[19] = result.r_d_q;
+        jd[20] = result.r_d_dq;
+        jd[21] = result.e_q;
+        jd[22] = result.e_dq;
+        jd[23] = result.observer_qacc;
+        jd[24] = result.observer_tau_applied;
+        jd[25] = result.u_raw;
+        jd[26] = raw_ref.now.q;
+        jd[27] = raw_ref.now.dq;
+
+        for (int i = 0; i < static_cast<int>(jd.size()) && i < kDebugSize; ++i) {
+            debug.data[i] = jd[i];
+        }
     }
 
 private:
@@ -136,6 +141,7 @@ private:
     };
 
     StepResult controllerStep(double q, double dq, const JointReferencePair& ref, double dt) {
+        const auto& c = cfg_.controller;
         const double eta_q = eta_q_;
         const double eta_dq = eta_dq_;
         const double x_hat_q = x_hat_q_;
@@ -151,30 +157,30 @@ private:
         const InverseResult inv =
             analyticInverseModel(ref.now.q, ref.now.dq, delta_r_c_q, delta_r_c_dq, dt);
 
-        const double den = cfg_.kp * cfg_.kp + cfg_.kd * cfg_.kd;
-        const double w_q = den < 1.0e-12 ? 0.0 : cfg_.kp / den;
-        const double w_dq = den < 1.0e-12 ? 0.0 : cfg_.kd / den;
+        const double den = c.kp * c.kp + c.kd * c.kd;
+        const double w_q = den < 1.0e-12 ? 0.0 : c.kp / den;
+        const double w_dq = den < 1.0e-12 ? 0.0 : c.kd / den;
         const double r_d_q = ref.now.q + w_q * inv.u_star;
         const double r_d_dq = ref.now.dq + w_dq * inv.u_star;
 
         const double e_q = r_d_q - x_bar_q;
         const double e_dq = r_d_dq - x_bar_dq;
-        const double u_raw = cfg_.kp * e_q + cfg_.kd * e_dq;
+        const double u_raw = c.kp * e_q + c.kd * e_dq;
         const double u_t = limitTorqueCommand(u_raw, dt);
 
-        const ForwardStep pred = kneeForward(x_bar_q, x_bar_dq, u_t, dt);
+        const ForwardStep pred = forwardModel(x_bar_q, x_bar_dq, u_t, dt);
         const double tilde_x_q = q - x_bar_q;
         const double tilde_x_dq = dq - x_bar_dq;
         const double eta_next_q =
-            cfg_.filter_alpha * cfg_.observer_gain_q * tilde_x_q +
-            (1.0 - cfg_.filter_alpha) * eta_lpf_q_;
+            c.filter_alpha * c.observer_gain_q * tilde_x_q +
+            (1.0 - c.filter_alpha) * eta_lpf_q_;
         const double eta_next_dq =
-            cfg_.filter_alpha * cfg_.observer_gain_dq * tilde_x_dq +
-            (1.0 - cfg_.filter_alpha) * eta_lpf_dq_;
+            c.filter_alpha * c.observer_gain_dq * tilde_x_dq +
+            (1.0 - c.filter_alpha) * eta_lpf_dq_;
 
         StepResult out;
         out.u_star = inv.u_star;
-        out.u_feedback = cfg_.kp * (ref.now.q - x_bar_q) + cfg_.kd * (ref.now.dq - x_bar_dq);
+        out.u_feedback = c.kp * (ref.now.q - x_bar_q) + c.kd * (ref.now.dq - x_bar_dq);
         out.u_t = u_t;
         out.rho_q = inv.rho_q;
         out.rho_dq = inv.rho_dq;
@@ -203,7 +209,7 @@ private:
 
     JointReferencePair shapeStartupReference(const JointReferencePair& raw, double t, double dt) const {
         JointReferencePair shaped = raw;
-        const double ramp = cfg_.startup_ramp_duration;
+        const double ramp = cfg_.controller.startup_ramp_duration;
         if (ramp <= 1.0e-9 || t >= ramp) {
             return shaped;
         }
@@ -232,13 +238,14 @@ private:
                                              double q,
                                              double dq,
                                              double dt) const {
-        if (cfg_.reference_mode == ReferenceMode::OpenLoop) {
+        const auto& c = cfg_.controller;
+        if (c.reference_mode == ReferenceMode::OpenLoop) {
             return ramped;
         }
 
         JointReferencePair closed = ramped;
         const double alpha =
-            clamp(dt / std::max(cfg_.closed_loop_reference_tau, dt), 0.0, 1.0);
+            clamp(dt / std::max(c.closed_loop_reference_tau, dt), 0.0, 1.0);
         closed.now.q = q;
         closed.now.dq = dq;
         closed.next.q = q + alpha * (ramped.next.q - q);
@@ -247,9 +254,10 @@ private:
     }
 
     double limitTorqueCommand(double tau, double dt) {
-        const double tau_limit = std::min(std::abs(cfg_.eid_tau_limit), model_.tau_max);
+        const auto& c = cfg_.controller;
+        const double tau_limit = std::min(std::abs(c.eid_tau_limit), cfg_.plant.tau_max);
         double limited = clamp(tau, -tau_limit, tau_limit);
-        const double max_delta = std::max(0.0, cfg_.eid_tau_slew_rate) * std::max(dt, 0.0);
+        const double max_delta = std::max(0.0, c.eid_tau_slew_rate) * std::max(dt, 0.0);
         if (max_delta > 0.0) {
             limited = clamp(limited, last_tau_ - max_delta, last_tau_ + max_delta);
         }
@@ -262,21 +270,23 @@ private:
                                        double delta_q,
                                        double delta_dq,
                                        double dt) const {
+        const auto& c = cfg_.controller;
+        const auto& model = cfg_.plant;
         const double q_target_next = q + delta_q;
         const double dq_target_next = dq + delta_dq;
-        const double bias = model_.b * dq + gravityTorque(q) + model_.tau0;
+        const double bias = model.b * dq + gravityTorque(q) + model.tau0;
 
         const double tau_from_q =
-            bias + model_.Jeff * ((q_target_next - q - dt * dq) / (dt * dt));
+            bias + model.Jeff * ((q_target_next - q - dt * dq) / (dt * dt));
         const double tau_from_dq =
-            bias + model_.Jeff * ((dq_target_next - dq) / dt);
+            bias + model.Jeff * ((dq_target_next - dq) / dt);
 
         const double q_weight =
-            cfg_.inverse_q_weight > 0.0 ? cfg_.inverse_q_weight : 0.5 / (dt * dt);
+            c.inverse_q_weight > 0.0 ? c.inverse_q_weight : 0.5 / (dt * dt);
         const double dq_weight =
-            cfg_.inverse_dq_weight > 0.0 ? cfg_.inverse_dq_weight : 1.0;
-        const double aq = dt * dt / model_.Jeff;
-        const double adq = dt / model_.Jeff;
+            c.inverse_dq_weight > 0.0 ? c.inverse_dq_weight : 1.0;
+        const double aq = dt * dt / model.Jeff;
+        const double adq = dt / model.Jeff;
         const double den = q_weight * aq * aq + dq_weight * adq * adq;
 
         double u_star = 0.0;
@@ -284,9 +294,9 @@ private:
             u_star = (q_weight * aq * aq * tau_from_q +
                       dq_weight * adq * adq * tau_from_dq) / den;
         }
-        u_star = clamp(u_star, -model_.tau_max, model_.tau_max);
+        u_star = clamp(u_star, -model.tau_max, model.tau_max);
 
-        const ForwardStep pred = kneeForward(q, dq, u_star, dt);
+        const ForwardStep pred = forwardModel(q, dq, u_star, dt);
 
         InverseResult result;
         result.u_star = u_star;
@@ -295,19 +305,20 @@ private:
         return result;
     }
 
-    ForwardStep kneeForward(double q, double dq, double tau_raw, double dt) const {
-        const double tau = clamp(tau_raw, -model_.tau_max, model_.tau_max);
-        const double qacc = (tau - model_.b * dq - gravityTorque(q) - model_.tau0) / model_.Jeff;
+    ForwardStep forwardModel(double q, double dq, double tau_raw, double dt) const {
+        const auto& model = cfg_.plant;
+        const double tau = clamp(tau_raw, -model.tau_max, model.tau_max);
+        const double qacc = (tau - model.b * dq - gravityTorque(q) - model.tau0) / model.Jeff;
         double dq_next = dq + dt * qacc;
         double q_next = q + dt * dq_next;
 
-        if (q_next < model_.q_min) {
-            q_next = model_.q_min;
+        if (q_next < model.q_min) {
+            q_next = model.q_min;
             if (dq_next < 0.0) {
                 dq_next = 0.0;
             }
-        } else if (q_next > model_.q_max) {
-            q_next = model_.q_max;
+        } else if (q_next > model.q_max) {
+            q_next = model.q_max;
             if (dq_next > 0.0) {
                 dq_next = 0.0;
             }
@@ -317,13 +328,14 @@ private:
     }
 
     double gravityTorque(double q) const {
-        return model_.gravityA * std::sin(q) + model_.gravityB * std::cos(q);
+        const auto& model = cfg_.plant;
+        return model.gravityA * std::sin(q) + model.gravityB * std::cos(q);
     }
 
     static ReferenceTrajectoryConfig makeReferenceConfig(const EidControllerConfig& cfg,
                                                          const PlantModelConfig& model) {
-        constexpr double kRefMin = 0.0;
-        constexpr double kRefMax = 1.5;
+        constexpr double kRefMin = -10.0;
+        constexpr double kRefMax = 10.0;
         constexpr double kMaxFrequency = 0.8;
         constexpr double kDefaultFrequency = 0.05;
         constexpr double kStartAtMinPhase = -1.57079632679489661923;
@@ -334,18 +346,24 @@ private:
         const double default_amplitude = 0.5 * (q_max - q_min);
 
         ReferenceTrajectoryConfig ref;
+        ref.signal = cfg.reference_signal;
         ref.policy_dt = cfg.policy_reference_dt;
+        ref.step_time = cfg.ref_step_time;
         if (q_max > q_min) {
             ref.center = std::isfinite(cfg.ref_center)
                              ? clamp(cfg.ref_center, q_min, q_max)
                              : default_center;
 
             const double requested_amplitude =
-                (std::isfinite(cfg.ref_amplitude) && cfg.ref_amplitude > 0.0)
-                    ? cfg.ref_amplitude
-                    : default_amplitude;
-            const double max_amplitude = std::min(ref.center - q_min, q_max - ref.center);
-            ref.amplitude = clamp(requested_amplitude, 0.0, max_amplitude);
+                std::isfinite(cfg.ref_amplitude) ? cfg.ref_amplitude : default_amplitude;
+            const double max_positive_amplitude = q_max - ref.center;
+            const double max_negative_amplitude = q_min - ref.center;
+            if (cfg.reference_signal == ReferenceSignal::Step) {
+                ref.amplitude = clamp(requested_amplitude, max_negative_amplitude, max_positive_amplitude);
+            } else {
+                const double max_amplitude = std::min(ref.center - q_min, q_max - ref.center);
+                ref.amplitude = clamp(std::abs(requested_amplitude), 0.0, max_amplitude);
+            }
         } else {
             ref.center = clamp(cfg.ref_center, model.q_min, model.q_max);
             ref.amplitude = 0.0;
@@ -364,8 +382,7 @@ private:
         return std::max(lo, std::min(x, hi));
     }
 
-    EidControllerConfig cfg_;
-    PlantModelConfig model_;
+    JointEidConfig cfg_;
     bool initialized_ = false;
     double t0_ = 0.0;
     double eta_q_ = 0.0;
@@ -378,6 +395,43 @@ private:
     double dq_start_ = 0.0;
     double last_tau_ = 0.0;
     SmoothSineReferenceTrajectory reference_;
+};
+
+class EidMultiJointController final : public IController {
+public:
+    explicit EidMultiJointController(RuntimeConfig cfg)
+        : safety_(cfg.safety) {
+        for (int joint_id : activeEidJoints(cfg)) {
+            controllers_.emplace_back(*cfg.eid_controllers[joint_id]);
+        }
+    }
+
+    std::string name() const override {
+        std::ostringstream out;
+        out << "EidMultiJointController(" << controllers_.size() << " joints)";
+        return out.str();
+    }
+
+    void reset(const RobotState& state) override {
+        for (auto& controller : controllers_) {
+            controller.reset(state);
+        }
+    }
+
+    void step(const RobotState& state, RobotCommand& command, ControllerDebug& debug) override {
+        fillSafeHoldCommand(state, command, safety_);
+        for (auto& controller : controllers_) {
+            controller.stepJoint(state, command, debug);
+        }
+    }
+
+    const std::vector<EidJointController>& jointControllers() const {
+        return controllers_;
+    }
+
+private:
+    SafetyConfig safety_;
+    std::vector<EidJointController> controllers_;
 };
 
 }  // namespace h1if

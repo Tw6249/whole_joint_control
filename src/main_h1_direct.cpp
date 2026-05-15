@@ -4,6 +4,7 @@
 #include "safety.hpp"
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -14,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <pthread.h>
 #include <sched.h>
@@ -112,7 +114,8 @@ class UnitreeH1DirectInterface {
 public:
     explicit UnitreeH1DirectInterface(h1if::RuntimeConfig cfg)
         : cfg_(std::move(cfg)),
-          controller_(cfg_.controller, cfg_.plant) {}
+          controller_(cfg_),
+          active_joints_(h1if::activeEidJoints(cfg_)) {}
 
     void init() {
         initRealtimeMemory();
@@ -147,8 +150,6 @@ public:
 
         std::uint64_t cycle = 0;
         double last_t = nowSec();
-        double last_target_q = 0.0;
-        bool have_last_target_q = false;
 
         while (g_running.load(std::memory_order_acquire)) {
             const auto loop_start = std::chrono::steady_clock::now();
@@ -161,15 +162,16 @@ public:
             h1if::ControllerDebug debug;
 
             std::string trip_reason;
-            if (checkMeasuredTrip(state, actual_dt, last_target_q, have_last_target_q, trip_reason)) {
+            if (checkMeasuredTrip(state, actual_dt, trip_reason)) {
                 std::cerr << "EID stopped: " << trip_reason << "\n";
                 sendSafeHold();
                 break;
             }
 
-            h1if::fillSafeHoldCommand(state, command, cfg_.safety);
             if (state.state_valid) {
                 controller_.step(state, command, debug);
+            } else {
+                h1if::fillSafeHoldCommand(state, command, cfg_.safety);
             }
             h1if::applySafety(state, command, debug, cfg_.safety);
 
@@ -279,20 +281,21 @@ private:
     }
 
     void pushLog(const h1if::RobotState& state, const h1if::RobotCommand& command, const h1if::ControllerDebug& debug) {
-        const int j = cfg_.controller.target_joint;
-        h1if::LogSample sample;
-        sample.cycle = state.cycle;
-        sample.t = state.t;
-        sample.dt = state.dt;
-        sample.lowstate_age = state.lowstate_age;
-        sample.joint_id = j;
-        sample.measured = state.joint[j];
-        sample.command = command.joint[j];
-        sample.flags = debug.flags;
-        for (int i = 0; i < static_cast<int>(sample.debug.size()); ++i) {
-            sample.debug[i] = debug.data[i];
+        for (int j : active_joints_) {
+            h1if::LogSample sample;
+            sample.cycle = state.cycle;
+            sample.t = state.t;
+            sample.dt = state.dt;
+            sample.lowstate_age = state.lowstate_age;
+            sample.joint_id = j;
+            sample.measured = state.joint[j];
+            sample.command = command.joint[j];
+            sample.flags = debug.flags | debug.joint[j].flags;
+            for (int i = 0; i < static_cast<int>(sample.debug.size()); ++i) {
+                sample.debug[i] = debug.joint[j].data[i];
+            }
+            logger_.push(sample);
         }
-        logger_.push(sample);
     }
 
     void sendSafeHold() {
@@ -306,40 +309,41 @@ private:
 
     bool checkMeasuredTrip(const h1if::RobotState& state,
                            double dt,
-                           double& last_target_q,
-                           bool& have_last_target_q,
-                           std::string& reason) const {
-        const int j = cfg_.controller.target_joint;
-        const auto& lim = cfg_.safety.limit[j];
-        const auto& target = state.joint[j];
-
+                           std::string& reason) {
         if (!state.state_valid || state.lowstate_age > cfg_.safety.lowstate_timeout) {
             reason = "LowState timeout";
-            return true;
-        }
-        if (!std::isfinite(target.q) || !std::isfinite(target.dq) || !std::isfinite(target.tau_est)) {
-            reason = "non-finite target joint state";
-            return true;
-        }
-        if (target.q < lim.q_min || target.q > lim.q_max) {
-            reason = "target joint angle exceeded configured limits";
-            return true;
-        }
-        if (std::abs(target.dq) > kMaxMeasuredSpeed) {
-            reason = "target joint speed exceeded measured-speed trip";
             return true;
         }
         if (dt <= 0.0 || dt > kMaxControlDt) {
             reason = "control loop jitter/overrun exceeded trip";
             return true;
         }
-        if (have_last_target_q && std::abs(target.q - last_target_q) > kMaxMeasuredJump) {
-            reason = "target joint measured angle jumped too far";
-            return true;
-        }
 
-        last_target_q = target.q;
-        have_last_target_q = true;
+        for (int j : active_joints_) {
+            const auto& lim = cfg_.safety.limit[j];
+            const auto& target = state.joint[j];
+            const std::string prefix = "joint " + std::to_string(j) + ": ";
+
+            if (!std::isfinite(target.q) || !std::isfinite(target.dq) || !std::isfinite(target.tau_est)) {
+                reason = prefix + "non-finite measured state";
+                return true;
+            }
+            if (target.q < lim.q_min || target.q > lim.q_max) {
+                reason = prefix + "angle exceeded configured limits";
+                return true;
+            }
+            if (std::abs(target.dq) > kMaxMeasuredSpeed) {
+                reason = prefix + "speed exceeded measured-speed trip";
+                return true;
+            }
+            if (have_last_q_[j] && std::abs(target.q - last_q_[j]) > kMaxMeasuredJump) {
+                reason = prefix + "measured angle jumped too far";
+                return true;
+            }
+
+            last_q_[j] = target.q;
+            have_last_q_[j] = true;
+        }
         return false;
     }
 
@@ -380,7 +384,10 @@ private:
     }
 
     h1if::RuntimeConfig cfg_;
-    h1if::EidSingleJointController controller_;
+    h1if::EidMultiJointController controller_;
+    std::vector<int> active_joints_;
+    std::array<double, h1if::kMaxMotors> last_q_{};
+    std::array<bool, h1if::kMaxMotors> have_last_q_{};
     AtomicRobotCache cache_;
     LowCmdMsg low_cmd_{};
     unitree::robot::ChannelPublisherPtr<LowCmdMsg> lowcmd_pub_;

@@ -4,10 +4,12 @@
 #include "safety.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -25,11 +27,15 @@ double gravityTorque(const h1if::PlantModelConfig& model, double q) {
     return model.gravityA * std::sin(q) + model.gravityB * std::cos(q);
 }
 
-double initialMockPosition(const h1if::RuntimeConfig& cfg) {
-    const auto& controller = cfg.controller;
-    const auto& plant = cfg.plant;
-    const double q0 =
-        controller.ref_center + controller.ref_amplitude * std::sin(controller.ref_phase);
+double initialMockPosition(const h1if::JointEidConfig& joint_cfg) {
+    const auto& controller = joint_cfg.controller;
+    const auto& plant = joint_cfg.plant;
+    double q0 = controller.ref_center;
+    if (controller.reference_signal == h1if::ReferenceSignal::Sine) {
+        q0 = controller.ref_center + controller.ref_amplitude * std::sin(controller.ref_phase);
+    } else if (controller.ref_step_time <= 0.0) {
+        q0 = controller.ref_center + controller.ref_amplitude;
+    }
     return clamp(q0, plant.q_min, plant.q_max);
 }
 
@@ -59,28 +65,33 @@ void stepPlant(const h1if::PlantModelConfig& model, const h1if::JointCommand& cm
 
 int main(int argc, char** argv) {
     try {
-        const std::string config_path = argc >= 2 ? argv[1] : "config/h1_right_knee.yaml";
+        const std::string config_path = argc >= 2 ? argv[1] : "config/h1_full_body_mujoco_fit.yaml";
         h1if::RuntimeConfig cfg = h1if::loadRuntimeConfig(config_path);
         if (argc >= 3) {
             cfg.mock_duration = std::atof(argv[2]);
         }
         cfg.log_path = h1if::resolveLogPath(cfg);
 
-        const int joint_id = cfg.controller.target_joint;
+        const std::vector<int> active_joints = h1if::activeEidJoints(cfg);
         const double dt = cfg.control_dt;
         const int steps = static_cast<int>(std::ceil(cfg.mock_duration / dt));
 
-        PlantState plant{initialMockPosition(cfg), 0.0, 0.0};
+        std::array<PlantState, h1if::kMaxMotors> plants{};
+        for (int j : active_joints) {
+            plants[j] = PlantState{initialMockPosition(*cfg.eid_controllers[j]), 0.0, 0.0};
+        }
 
         h1if::RobotState state;
         state.dt = dt;
         state.state_valid = true;
         state.lowstate_age = 0.0;
-        state.joint[joint_id].q = plant.q;
-        state.joint[joint_id].dq = plant.dq;
-        state.joint[joint_id].tau_est = plant.tau_est;
+        for (int j : active_joints) {
+            state.joint[j].q = plants[j].q;
+            state.joint[j].dq = plants[j].dq;
+            state.joint[j].tau_est = plants[j].tau_est;
+        }
 
-        h1if::EidSingleJointController controller(cfg.controller, cfg.plant);
+        h1if::EidMultiJointController controller(cfg);
         controller.reset(state);
 
         h1if::AsyncCsvLogger<> logger;
@@ -98,45 +109,52 @@ int main(int argc, char** argv) {
             state.dt = dt;
             state.lowstate_age = 0.0;
             state.state_valid = true;
-            state.joint[joint_id].q = plant.q;
-            state.joint[joint_id].dq = plant.dq;
-            state.joint[joint_id].tau_est = plant.tau_est;
+            for (int j : active_joints) {
+                state.joint[j].q = plants[j].q;
+                state.joint[j].dq = plants[j].dq;
+                state.joint[j].tau_est = plants[j].tau_est;
+            }
 
             h1if::RobotCommand command;
             h1if::ControllerDebug debug;
-            h1if::fillSafeHoldCommand(state, command, cfg.safety);
             controller.step(state, command, debug);
             h1if::applySafety(state, command, debug, cfg.safety);
 
-            const auto joint_command = command.joint[joint_id];
-            stepPlant(cfg.plant, joint_command, dt, plant);
-
-            const double q_ref = debug.data[0];
-            const double err = q_ref - state.joint[joint_id].q;
-            q_error_energy += err * err;
-            max_abs_tau = std::max(max_abs_tau, std::abs(static_cast<double>(joint_command.tau)));
             combined_flags |= debug.flags;
 
-            h1if::LogSample sample;
-            sample.cycle = state.cycle;
-            sample.t = state.t;
-            sample.dt = dt;
-            sample.lowstate_age = state.lowstate_age;
-            sample.joint_id = joint_id;
-            sample.measured = state.joint[joint_id];
-            sample.command = joint_command;
-            sample.flags = debug.flags;
-            for (int i = 0; i < static_cast<int>(sample.debug.size()); ++i) {
-                sample.debug[i] = debug.data[i];
+            for (int j : active_joints) {
+                const auto joint_command = command.joint[j];
+                stepPlant(cfg.eid_controllers[j]->plant, joint_command, dt, plants[j]);
+
+                const double q_ref = debug.joint[j].data[0];
+                const double err = q_ref - state.joint[j].q;
+                q_error_energy += err * err;
+                max_abs_tau = std::max(max_abs_tau, std::abs(static_cast<double>(joint_command.tau)));
+                combined_flags |= debug.joint[j].flags;
+
+                h1if::LogSample sample;
+                sample.cycle = state.cycle;
+                sample.t = state.t;
+                sample.dt = dt;
+                sample.lowstate_age = state.lowstate_age;
+                sample.joint_id = j;
+                sample.measured = state.joint[j];
+                sample.command = joint_command;
+                sample.flags = debug.flags | debug.joint[j].flags;
+                for (int i = 0; i < static_cast<int>(sample.debug.size()); ++i) {
+                    sample.debug[i] = debug.joint[j].data[i];
+                }
+                logger.push(sample);
             }
-            logger.push(sample);
         }
 
         logger.stop();
 
-        const double q_rmse = std::sqrt(q_error_energy / std::max(1, steps));
+        const double q_rmse =
+            std::sqrt(q_error_energy / std::max(1, steps * static_cast<int>(active_joints.size())));
         std::cout << "mock_closed_loop finished\n"
                   << "  samples=" << steps << "\n"
+                  << "  active_joints=" << active_joints.size() << "\n"
                   << "  dt=" << dt << "\n"
                   << "  q_rmse=" << q_rmse << "\n"
                   << "  max_abs_tau=" << max_abs_tau << "\n"

@@ -45,8 +45,14 @@ struct RobotCommand {
     std::array<JointCommand, kMaxMotors> joint;
 };
 
+struct JointDebug {
+    std::array<double, 32> data{};
+    std::uint32_t flags = 0;
+};
+
 struct ControllerDebug {
     std::array<double, kDebugSize> data{};
+    std::array<JointDebug, kMaxMotors> joint{};
     std::uint32_t flags = 0;
 };
 

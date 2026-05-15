@@ -13,9 +13,15 @@
       "Bash(cmake -B build-h1 -S .)",
       "Bash(Remove-Item -Recurse -Force build-h1 -ErrorAction SilentlyContinue)",
       "Bash(cmake --build build-h1)",
-      "Bash(build-h1\\\\Debug\\\\h1_mock_closed_loop.exe config/h1_right_knee.yaml 5.0)",
-      "Bash(./build-h1/Debug/h1_mock_closed_loop.exe config/h1_right_knee.yaml 5.0)",
-      "Bash(python scripts/plot_eid_log.py data/20260514_154943/h1_mock_log.csv)"
+      "Bash(build-h1\\\\Debug\\\\h1_mock_closed_loop.exe config/h1_lower_body.yaml 5.0)",
+      "Bash(./build-h1/Debug/h1_mock_closed_loop.exe config/h1_lower_body.yaml 5.0)",
+      "Bash(python scripts/plot_eid_log.py data/20260514_154943/h1_mock_log.csv)",
+      "Bash(Remove-Item -Recurse -Force \"d:\\\\BaiduSyncdisk\\\\lower_body_control\\\\data\\\\ruckig_eval_configs\")",
+      "Bash(git mv *)",
+      "Bash(Remove-Item -Recurse -Force \"d:\\\\BaiduSyncdisk\\\\lower_body_control\\\\build-h1\" -ErrorAction SilentlyContinue)",
+      "Bash(cmake -B build-h1 -S . -DH1IF_BUILD_UNITREE=ON)",
+      "Bash(cmake -B build-h1 -S . -DH1IF_BUILD_UNITREE=OFF)",
+      "Bash(cmake --build build-h1 --config Debug --target h1_eid_stepper h1_safety_tests h1_mock_closed_loop)"
     ]
   }
 }

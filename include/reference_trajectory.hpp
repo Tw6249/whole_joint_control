@@ -16,12 +16,19 @@ struct JointReferencePair {
     JointReference next;
 };
 
+enum class ReferenceSignal {
+    Sine,
+    Step,
+};
+
 struct ReferenceTrajectoryConfig {
+    ReferenceSignal signal = ReferenceSignal::Sine;
     double policy_dt = 0.05;
     double center = 0.9;
     double amplitude = 0.08;
     double frequency = 0.10;
     double phase = 0.0;
+    double step_time = 1.0;
 };
 
 class SmoothSineReferenceTrajectory {
@@ -56,8 +63,10 @@ private:
         double last_amplitude = 0.0;
         double last_frequency = 0.0;
         double last_phase = 0.0;
+        double last_step_time = -1.0;
         double last_ts = -1.0;
         double last_t_policy = -1.0;
+        ReferenceSignal last_signal = ReferenceSignal::Sine;
         int n_nodes = 2;
         double node_dt = 0.0;
         std::array<double, kMaxNodes> q_nodes{};
@@ -76,8 +85,10 @@ private:
             std::abs(cfg_.amplitude - plan_.last_amplitude) > 1.0e-12 ||
             std::abs(cfg_.frequency - plan_.last_frequency) > 1.0e-12 ||
             std::abs(cfg_.phase - plan_.last_phase) > 1.0e-12 ||
+            std::abs(cfg_.step_time - plan_.last_step_time) > 1.0e-12 ||
             std::abs(ts - plan_.last_ts) > 1.0e-12 ||
-            std::abs(t_policy - plan_.last_t_policy) > 1.0e-12;
+            std::abs(t_policy - plan_.last_t_policy) > 1.0e-12 ||
+            cfg_.signal != plan_.last_signal;
 
         if (t < plan_.last_t - 0.5 * ts || params_changed) {
             plan_.initialized = false;
@@ -112,8 +123,10 @@ private:
             plan_.last_amplitude = cfg_.amplitude;
             plan_.last_frequency = cfg_.frequency;
             plan_.last_phase = cfg_.phase;
+            plan_.last_step_time = cfg_.step_time;
             plan_.last_ts = ts;
             plan_.last_t_policy = t_policy;
+            plan_.last_signal = cfg_.signal;
         }
 
         const double tau = clamp(t - segment * t_policy, 0.0, t_policy);
@@ -187,8 +200,16 @@ private:
 
     double policyPosition(double t) const {
         constexpr double pi = 3.14159265358979323846;
-        return cfg_.center +
-               cfg_.amplitude * std::sin(2.0 * pi * cfg_.frequency * t + cfg_.phase);
+        if (cfg_.signal == ReferenceSignal::Sine) {
+            return cfg_.center +
+                   cfg_.amplitude * std::sin(2.0 * pi * cfg_.frequency * t + cfg_.phase);
+        }
+
+        if (cfg_.signal == ReferenceSignal::Step) {
+            return t < cfg_.step_time ? cfg_.center : cfg_.center + cfg_.amplitude;
+        }
+
+        return cfg_.center;
     }
 
     static void evalQuintic(double q0,

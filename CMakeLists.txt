@@ -19,6 +19,11 @@ add_executable(h1_mock_closed_loop
 )
 target_link_libraries(h1_mock_closed_loop PRIVATE h1if_core Threads::Threads)
 
+add_executable(h1_eid_stepper
+    src/eid_stepper.cpp
+)
+target_link_libraries(h1_eid_stepper PRIVATE h1if_core)
+
 add_executable(h1_safety_tests
     tests/test_safety.cpp
 )
@@ -26,7 +31,7 @@ target_link_libraries(h1_safety_tests PRIVATE h1if_core)
 
 enable_testing()
 add_test(NAME h1_safety_tests COMMAND h1_safety_tests)
-add_test(NAME h1_mock_closed_loop COMMAND h1_mock_closed_loop ${CMAKE_CURRENT_SOURCE_DIR}/config/h1_right_knee.yaml 1.0)
+add_test(NAME h1_mock_closed_loop COMMAND h1_mock_closed_loop ${CMAKE_CURRENT_SOURCE_DIR}/config/h1_full_body_mujoco_fit.yaml 1.0)
 
 if(H1IF_BUILD_UNITREE)
     find_package(unitree_sdk2 REQUIRED)

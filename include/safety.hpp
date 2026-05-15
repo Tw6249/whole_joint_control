@@ -104,6 +104,7 @@ inline void applySafety(const RobotState& state, RobotCommand& cmd, ControllerDe
         if (!finiteCommand(c)) {
             unsafe = true;
             debug.flags |= kSafetyNonFiniteCommand;
+            debug.joint[i].flags |= kSafetyNonFiniteCommand;
             continue;
         }
 
@@ -118,6 +119,7 @@ inline void applySafety(const RobotState& state, RobotCommand& cmd, ControllerDe
         if (before.q != c.q || before.dq != c.dq || before.kp != c.kp ||
             before.kd != c.kd || before.tau != c.tau) {
             debug.flags |= kSafetyCommandSaturated;
+            debug.joint[i].flags |= kSafetyCommandSaturated;
         }
     }
 

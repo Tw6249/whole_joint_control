@@ -25,7 +25,7 @@ struct LogSample {
     std::uint32_t flags = 0;
 };
 
-template <std::size_t Capacity = 8192>
+template <std::size_t Capacity = 65536>
 class AsyncCsvLogger {
 public:
     AsyncCsvLogger() = default;
