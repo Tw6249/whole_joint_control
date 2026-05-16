@@ -262,8 +262,9 @@ private:
         const auto& c = cfg_.controller;
         const double tau_limit = std::min(std::abs(c.eid_tau_limit), cfg_.plant.tau_max);
         double limited = clamp(tau, -tau_limit, tau_limit);
-        const double max_delta = std::max(0.0, c.eid_tau_slew_rate) * std::max(dt, 0.0);
-        if (max_delta > 0.0) {
+        const double slew = c.eid_tau_slew_rate;
+        if (slew > 0.0) {
+            const double max_delta = slew * std::max(dt, 0.0);
             limited = clamp(limited, last_tau_ - max_delta, last_tau_ + max_delta);
         }
         last_tau_ = limited;

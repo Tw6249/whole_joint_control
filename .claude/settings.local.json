@@ -21,7 +21,17 @@
       "Bash(Remove-Item -Recurse -Force \"d:\\\\BaiduSyncdisk\\\\lower_body_control\\\\build-h1\" -ErrorAction SilentlyContinue)",
       "Bash(cmake -B build-h1 -S . -DH1IF_BUILD_UNITREE=ON)",
       "Bash(cmake -B build-h1 -S . -DH1IF_BUILD_UNITREE=OFF)",
-      "Bash(cmake --build build-h1 --config Debug --target h1_eid_stepper h1_safety_tests h1_mock_closed_loop)"
+      "Bash(cmake --build build-h1 --config Debug --target h1_eid_stepper h1_safety_tests h1_mock_closed_loop)",
+      "PowerShell(if \\(Test-Path \"build\\\\Debug\\\\h1_eid_stepper.exe\"\\) { Write-Host \"EXE exists\"; \\(Get-Item \"build\\\\Debug\\\\h1_eid_stepper.exe\"\\).Length } else { Write-Host \"EXE NOT FOUND\" })",
+      "PowerShell(pip install mujoco)",
+      "PowerShell(python scripts\\\\run_lower_body_mujoco_test.py --config config\\\\h1_full_body_mujoco_fit.yaml --duration 5.0 --dt 0.002 --fps 24 --run-name test_run)",
+      "PowerShell(pip install Pillow matplotlib)",
+      "PowerShell(ffmpeg -i \"data\\\\mujoco_fit\\\\runs\\\\test_run_02\\\\eid_mujoco_closed_loop.mp4\" -vf \"fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"data\\\\mujoco_fit\\\\runs\\\\test_run_02\\\\eid_mujoco_closed_loop.gif\" -y 2>$null)",
+      "PowerShell(Get-ChildItem \"data\\\\mujoco_fit\\\\runs\\\\test_run_02\" | Where-Object { -not $_.PSIsContainer } | ForEach-Object { [PSCustomObject]@{ Name=$_.Name; SizeKB=[math]::Round\\($_.Length/1KB, 1\\) } } | Format-Table -AutoSize)",
+      "PowerShell(python scripts\\\\_update_torque_limits.py)",
+      "PowerShell(cmake --build build --config Debug --target h1_eid_stepper 2>&1)",
+      "PowerShell(python scripts\\\\run_lower_body_mujoco_test.py --config config\\\\h1_full_body_mujoco_fit.yaml --duration 10.0 --dt 0.002 --fps 24 --run-name test_80pct_torque)",
+      "PowerShell(ffmpeg -i \"data\\\\mujoco_fit\\\\runs\\\\test_80pct_torque\\\\eid_mujoco_closed_loop.mp4\" -vf \"fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"data\\\\mujoco_fit\\\\runs\\\\test_80pct_torque\\\\eid_mujoco_closed_loop.gif\" -y 2>$null)"
     ]
   }
 }

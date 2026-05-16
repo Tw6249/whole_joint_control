@@ -261,7 +261,7 @@ inline void validateEidControllerConfig(const EidControllerConfig& c, const std:
     }
     if (c.startup_ramp_duration < 0.0 ||
         c.eid_tau_limit <= 0.0 ||
-        c.eid_tau_slew_rate <= 0.0 ||
+        c.eid_tau_slew_rate < 0.0 ||
         !finite(c.startup_ramp_duration) ||
         !finite(c.eid_tau_limit) ||
         !finite(c.eid_tau_slew_rate)) {
