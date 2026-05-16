@@ -14,6 +14,21 @@ def finite_float(value, default=math.nan):
         return default
 
 
+def rms(values):
+    finite = [value for value in values if math.isfinite(value)]
+    if not finite:
+        return math.nan
+    return math.sqrt(sum(value * value for value in finite) / len(finite))
+
+
+def choose_error_reference(rows):
+    shaped = [row["q_error_shaped"] for row in rows]
+    raw = [row["q_error_raw"] for row in rows]
+    if any(math.isfinite(value) for value in raw) and rms(shaped) < 1.0e-9 and rms(raw) > 1.0e-9:
+        return "raw"
+    return "shaped"
+
+
 def load_rows(path):
     rows = []
     with path.open(newline="") as f:
@@ -42,14 +57,34 @@ def load_rows(path):
                 "flags": int(float(row.get("flags", 0))),
                 "q_ref": q_ref,
                 "dq_ref": dq_ref,
-                "q_error": q_ref - q,
-                "dq_error": dq_ref - dq,
+                "q_error_shaped": q_ref - q,
+                "dq_error_shaped": dq_ref - dq,
                 "u_raw": finite_float(row.get("debug_25")),
+                "e_q": finite_float(row.get("debug_21")),
+                "e_dq": finite_float(row.get("debug_22")),
                 "q_ref_raw": finite_float(row.get("debug_26")),
                 "dq_ref_raw": finite_float(row.get("debug_27")),
+                "q_error_raw": math.nan,
+                "dq_error_raw": math.nan,
             })
     if not rows:
         raise RuntimeError(f"no EID rows parsed from {path}")
+
+    for row in rows:
+        if not math.isfinite(row["q_error_raw"]) and math.isfinite(row["q_ref_raw"]):
+            row["q_error_raw"] = row["q_ref_raw"] - row["q"]
+        if not math.isfinite(row["dq_error_raw"]) and math.isfinite(row["dq_ref_raw"]):
+            row["dq_error_raw"] = row["dq_ref_raw"] - row["dq"]
+
+    error_reference = choose_error_reference(rows)
+    for row in rows:
+        row["error_reference"] = error_reference
+        if error_reference == "raw":
+            row["q_error"] = row["q_error_raw"]
+            row["dq_error"] = row["dq_error_raw"]
+        else:
+            row["q_error"] = row["q_error_shaped"]
+            row["dq_error"] = row["dq_error_shaped"]
 
     t0 = rows[0]["t"]
     for row in rows:
@@ -66,10 +101,17 @@ def write_clean_csv(rows, path):
         "q_ref",
         "q",
         "q_error",
+        "q_error_raw",
+        "q_error_shaped",
         "dq_ref_raw",
         "dq_ref",
         "dq",
         "dq_error",
+        "dq_error_raw",
+        "dq_error_shaped",
+        "e_q",
+        "e_dq",
+        "error_reference",
         "tau_cmd",
         "u_raw",
         "tau_est",
@@ -86,6 +128,7 @@ def write_clean_csv(rows, path):
 def plot_rows(rows, path):
     t = [row["time_s"] for row in rows]
     has_raw = any(math.isfinite(row["q_ref_raw"]) for row in rows)
+    error_reference = rows[0].get("error_reference", "shaped")
 
     fig, axes = plt.subplots(5, 1, figsize=(12, 10), sharex=True, constrained_layout=True)
 
@@ -97,8 +140,19 @@ def plot_rows(rows, path):
     axes[0].legend(loc="best")
     axes[0].grid(True, alpha=0.3)
 
-    axes[1].plot(t, [row["q_error"] for row in rows], color="#d62728", linewidth=1.0)
-    axes[1].set_ylabel("q_ref - q")
+    error_label = "raw_ref - q" if error_reference == "raw" else "shaped_ref - q"
+    axes[1].plot(t, [row["q_error"] for row in rows], label=error_label, color="#d62728", linewidth=1.0)
+    if error_reference == "raw":
+        axes[1].plot(t, [row["q_error_shaped"] for row in rows],
+                     label="shaped_ref - q", color="#7f7f7f", linewidth=0.8, alpha=0.55)
+    elif has_raw:
+        axes[1].plot(t, [row["q_error_raw"] for row in rows],
+                     label="raw_ref - q", color="#7f7f7f", linewidth=0.8, alpha=0.55)
+    if any(math.isfinite(row["e_q"]) for row in rows):
+        axes[1].plot(t, [row["e_q"] for row in rows],
+                     label="controller e_q", color="#1f77b4", linewidth=0.8, alpha=0.7)
+    axes[1].set_ylabel(error_label)
+    axes[1].legend(loc="best")
     axes[1].grid(True, alpha=0.3)
 
     if has_raw:
@@ -132,9 +186,12 @@ def summarize(rows):
         return [row[key] for row in rows if isinstance(row.get(key), (int, float)) and math.isfinite(row[key])]
 
     q_err = values("q_error")
+    q_err_raw = values("q_error_raw")
+    q_err_shaped = values("q_error_shaped")
     summary = {
         "samples": len(rows),
         "duration_s": rows[-1]["time_s"],
+        "q_error_reference": rows[0].get("error_reference", "shaped"),
         "q_ref_min": min(values("q_ref")),
         "q_ref_max": max(values("q_ref")),
         "q_min": min(values("q")),
@@ -149,6 +206,13 @@ def summarize(rows):
     if raw:
         summary["q_ref_raw_min"] = min(raw)
         summary["q_ref_raw_max"] = max(raw)
+    if q_err_raw:
+        summary["q_error_raw_rmse"] = math.sqrt(sum(e * e for e in q_err_raw) / len(q_err_raw))
+    if q_err_shaped:
+        summary["q_error_shaped_rmse"] = math.sqrt(sum(e * e for e in q_err_shaped) / len(q_err_shaped))
+    e_q = values("e_q")
+    if e_q:
+        summary["controller_e_q_rmse"] = math.sqrt(sum(e * e for e in e_q) / len(e_q))
     return summary
 
 

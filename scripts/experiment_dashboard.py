@@ -31,20 +31,72 @@ from index_runs import build_index, write_index  # noqa: E402
 DEFAULT_DATA_ROOT = REPO_ROOT / "data"
 DEFAULT_INDEX_PATH = DEFAULT_DATA_ROOT / "runs_index.csv"
 
+
+def optional_numeric(df: pd.DataFrame, column: str) -> pd.Series:
+    if column not in df.columns:
+        return pd.Series(math.nan, index=df.index, dtype="float64")
+    return pd.to_numeric(df[column], errors="coerce")
+
+
+def q_error_shaped(df: pd.DataFrame) -> pd.Series:
+    return optional_numeric(df, "debug_0") - df["q"]
+
+
+def dq_error_shaped(df: pd.DataFrame) -> pd.Series:
+    return optional_numeric(df, "debug_1") - df["dq"]
+
+
+def q_error_raw(df: pd.DataFrame) -> pd.Series:
+    return optional_numeric(df, "debug_26") - df["q"]
+
+
+def dq_error_raw(df: pd.DataFrame) -> pd.Series:
+    return optional_numeric(df, "debug_27") - df["dq"]
+
+
+def rms_series(series: pd.Series) -> float:
+    finite = pd.to_numeric(series, errors="coerce").dropna()
+    if finite.empty:
+        return math.nan
+    return math.sqrt(float((finite * finite).mean()))
+
+
+def q_error(df: pd.DataFrame) -> pd.Series:
+    shaped = q_error_shaped(df)
+    raw = q_error_raw(df)
+    if raw.notna().any() and rms_series(shaped) < 1.0e-9 and rms_series(raw) > 1.0e-9:
+        return raw
+    return shaped
+
+
+def dq_error(df: pd.DataFrame) -> pd.Series:
+    shaped = dq_error_shaped(df)
+    raw = dq_error_raw(df)
+    if raw.notna().any() and rms_series(q_error_shaped(df)) < 1.0e-9 and rms_series(q_error_raw(df)) > 1.0e-9:
+        return raw
+    return shaped
+
+
 DERIVED_FIELDS = {
     "time_s": lambda df: df["t"] - df["t"].iloc[0],
     "q_ref": lambda df: df["debug_0"],
     "dq_ref": lambda df: df["debug_1"],
-    "q_error": lambda df: df["debug_0"] - df["q"],
-    "dq_error": lambda df: df["debug_1"] - df["dq"],
+    "q_error": q_error,
+    "dq_error": dq_error,
+    "q_error_raw": q_error_raw,
+    "dq_error_raw": dq_error_raw,
+    "q_error_shaped": q_error_shaped,
+    "dq_error_shaped": dq_error_shaped,
     "u_raw": lambda df: df["debug_25"],
+    "e_q": lambda df: df["debug_21"],
+    "e_dq": lambda df: df["debug_22"],
     "q_ref_raw": lambda df: df["debug_26"],
     "dq_ref_raw": lambda df: df["debug_27"],
 }
 
 PRESETS = {
-    "Tracking": ["q_ref", "q", "q_error"],
-    "Velocity": ["dq_ref", "dq", "dq_error"],
+    "Tracking": ["q_ref_raw", "q_ref", "q", "q_error", "e_q"],
+    "Velocity": ["dq_ref_raw", "dq_ref", "dq", "dq_error", "e_dq"],
     "Torque": ["tau_cmd", "u_raw", "tau_est"],
     "Safety": ["lowstate_age", "flags", "dt"],
 }
@@ -60,6 +112,7 @@ TABLE_COLUMNS = [
     "trajectory",
     "duration_s",
     "q_error_rmse",
+    "q_error_reference",
     "tau_cmd_abs_max",
     "flags",
 ]

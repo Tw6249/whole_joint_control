@@ -75,8 +75,9 @@ public:
         jd[1] = ref.now.dq;
         jd[2] = q;
         jd[3] = dq;
-        jd[4] = ref.now.q - q;
-        jd[5] = ref.now.dq - dq;
+        const bool closed_loop_reference = cfg_.controller.reference_mode == ReferenceMode::ClosedLoop;
+        jd[4] = (closed_loop_reference ? raw_ref.now.q : ref.now.q) - q;
+        jd[5] = (closed_loop_reference ? raw_ref.now.dq : ref.now.dq) - dq;
         jd[6] = result.u_star;
         jd[7] = result.u_feedback;
         jd[8] = result.u_t;
@@ -99,6 +100,10 @@ public:
         jd[25] = result.u_raw;
         jd[26] = raw_ref.now.q;
         jd[27] = raw_ref.now.dq;
+        jd[28] = raw_ref.now.q - q;
+        jd[29] = raw_ref.now.dq - dq;
+        jd[30] = ref.now.q - q;
+        jd[31] = ref.now.dq - dq;
 
         for (int i = 0; i < static_cast<int>(jd.size()) && i < kDebugSize; ++i) {
             debug.data[i] = jd[i];

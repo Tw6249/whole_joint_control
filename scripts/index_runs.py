@@ -74,6 +74,7 @@ INDEX_COLUMNS = [
     "samples",
     "duration_s",
     "q_error_rmse",
+    "q_error_reference",
     "q_min",
     "q_max",
     "q_ref_min",
@@ -251,12 +252,16 @@ def summarize_log(path: Path) -> dict[str, object]:
     t_last = math.nan
     joint_id: int | None = None
     flags: set[int] = set()
-    q_error_sse = 0.0
-    q_error_count = 0
+    q_error_shaped_sse = 0.0
+    q_error_shaped_count = 0
+    q_error_raw_sse = 0.0
+    q_error_raw_count = 0
     q_min = math.inf
     q_max = -math.inf
-    q_ref_min = math.inf
-    q_ref_max = -math.inf
+    q_ref_shaped_min = math.inf
+    q_ref_shaped_max = -math.inf
+    q_ref_raw_min = math.inf
+    q_ref_raw_max = -math.inf
     tau_abs_max = 0.0
     lowstate_age_max = 0.0
 
@@ -266,6 +271,7 @@ def summarize_log(path: Path) -> dict[str, object]:
             t = finite_float(row.get("t"))
             q = finite_float(row.get("q"))
             q_ref = finite_float(row.get("debug_0"))
+            q_ref_raw = finite_float(row.get("debug_26"))
             tau_cmd = finite_float(row.get("tau_cmd"))
             lowstate_age = finite_float(row.get("lowstate_age"))
             flag = maybe_int(row.get("flags"))
@@ -279,12 +285,23 @@ def summarize_log(path: Path) -> dict[str, object]:
                 q_min = min(q_min, q)
                 q_max = max(q_max, q)
             if math.isfinite(q_ref):
-                q_ref_min = min(q_ref_min, q_ref)
-                q_ref_max = max(q_ref_max, q_ref)
+                q_ref_shaped_min = min(q_ref_shaped_min, q_ref)
+                q_ref_shaped_max = max(q_ref_shaped_max, q_ref)
+            if math.isfinite(q_ref_raw):
+                q_ref_raw_min = min(q_ref_raw_min, q_ref_raw)
+                q_ref_raw_max = max(q_ref_raw_max, q_ref_raw)
+            q_error_shaped = math.nan
             if math.isfinite(q) and math.isfinite(q_ref):
-                q_error = q_ref - q
-                q_error_sse += q_error * q_error
-                q_error_count += 1
+                q_error_shaped = q_ref - q
+            if math.isfinite(q_error_shaped):
+                q_error_shaped_sse += q_error_shaped * q_error_shaped
+                q_error_shaped_count += 1
+            q_error_raw = math.nan
+            if math.isfinite(q) and math.isfinite(q_ref_raw):
+                q_error_raw = q_ref_raw - q
+            if math.isfinite(q_error_raw):
+                q_error_raw_sse += q_error_raw * q_error_raw
+                q_error_raw_count += 1
             if math.isfinite(tau_cmd):
                 tau_abs_max = max(tau_abs_max, abs(tau_cmd))
             if math.isfinite(lowstate_age):
@@ -294,7 +311,22 @@ def summarize_log(path: Path) -> dict[str, object]:
             samples += 1
 
     duration = t_last - t0 if math.isfinite(t0) and math.isfinite(t_last) else math.nan
-    rmse = math.sqrt(q_error_sse / q_error_count) if q_error_count else math.nan
+    shaped_rmse = (
+        math.sqrt(q_error_shaped_sse / q_error_shaped_count)
+        if q_error_shaped_count
+        else math.nan
+    )
+    raw_rmse = math.sqrt(q_error_raw_sse / q_error_raw_count) if q_error_raw_count else math.nan
+    use_raw_error = (
+        q_error_raw_count > 0
+        and math.isfinite(shaped_rmse)
+        and math.isfinite(raw_rmse)
+        and shaped_rmse < 1.0e-9
+        and raw_rmse > 1.0e-9
+    )
+    rmse = raw_rmse if use_raw_error else shaped_rmse
+    q_ref_min = q_ref_raw_min if use_raw_error else q_ref_shaped_min
+    q_ref_max = q_ref_raw_max if use_raw_error else q_ref_shaped_max
 
     def clean(value: float) -> float:
         return value if math.isfinite(value) else math.nan
@@ -304,6 +336,9 @@ def summarize_log(path: Path) -> dict[str, object]:
         "samples": samples,
         "duration_s": duration,
         "q_error_rmse": rmse,
+        "q_error_reference": "raw" if use_raw_error else "shaped",
+        "q_error_shaped_rmse": clean(shaped_rmse),
+        "q_error_raw_rmse": clean(raw_rmse),
         "q_min": clean(q_min),
         "q_max": clean(q_max),
         "q_ref_min": clean(q_ref_min),
@@ -344,9 +379,9 @@ def build_index(data_root: Path) -> list[dict[str, object]]:
             cfg_interpolation = "quintic"
 
         data_reference_mode = ""
-        rmse = finite_float(summary.get("q_error_rmse"))
-        if math.isfinite(rmse):
-            data_reference_mode = "closed_loop" if rmse < 1.0e-9 else "open_loop"
+        shaped_rmse = finite_float(summary.get("q_error_shaped_rmse"))
+        if math.isfinite(shaped_rmse):
+            data_reference_mode = "closed_loop" if shaped_rmse < 1.0e-9 else "open_loop"
 
         joint_id = maybe_int(run_meta.get("target.joint_id"))
         if joint_id is None:
