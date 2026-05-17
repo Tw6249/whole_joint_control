@@ -24,7 +24,7 @@ eid_defaults:
   closed_loop_reference_tau: 0.05
   ref_step_time: 1.0
   startup_ramp_duration: 4.0
-  eid_tau_slew_rate: 40.0
+  eid_tau_slew_rate: 0
   torque_safe_kp: 0.0
   torque_safe_kd: 0.8
   inverse_q_weight: 0.0

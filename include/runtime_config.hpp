@@ -41,8 +41,8 @@ struct EidControllerConfig {
     double ref_phase = -1.5707963267948966;
     double ref_step_time = 1.0;
     double startup_ramp_duration = 4.0;
-    double eid_tau_limit = 12.0;
-    double eid_tau_slew_rate = 60.0;
+    double eid_tau_limit = 0.0;
+    double eid_tau_slew_rate = 0.0;
     double torque_safe_kp = 0.0;
     double torque_safe_kd = 0.0;
     double inverse_q_weight = 0.0;
@@ -55,9 +55,9 @@ struct PlantModelConfig {
     double gravityA = 4.2835;
     double gravityB = 0.0;
     double tau0 = -0.2711;
-    double q_min = -0.26;
-    double q_max = 2.05;
-    double tau_max = 80.0;
+    double q_min = 0.0;
+    double q_max = 0.0;
+    double tau_max = 0.0;
 };
 
 struct JointEidConfig {
@@ -265,7 +265,7 @@ inline void validateEidControllerConfig(const EidControllerConfig& c, const std:
         !finite(c.startup_ramp_duration) ||
         !finite(c.eid_tau_limit) ||
         !finite(c.eid_tau_slew_rate)) {
-        throw std::runtime_error(prefix + " EID ramp/torque limits must be positive and finite");
+        throw std::runtime_error(prefix + " eid_tau_limit must be > 0 (set in YAML), eid_tau_slew_rate must be >= 0");
     }
     if (!finite(c.kp) || !finite(c.kd) ||
         !finite(c.observer_gain_q) || !finite(c.observer_gain_dq) ||

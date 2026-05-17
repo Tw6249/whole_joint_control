@@ -14,13 +14,15 @@ enum SafetyFlags : std::uint32_t {
     kSafetyInvalidState = 1u << 3
 };
 
+// Limits for uncontrolled joints default to zero torque/velocity/gain.
+// Controlled joints must have their limits set via YAML joint_limits section.
 struct JointLimit {
     float q_min = -3.14f;
     float q_max = 3.14f;
-    float dq_max = 10.0f;
-    float tau_max = 50.0f;
-    float kp_max = 200.0f;
-    float kd_max = 20.0f;
+    float dq_max = 0.0f;
+    float tau_max = 0.0f;
+    float kp_max = 0.0f;
+    float kd_max = 0.0f;
 };
 
 struct SafetyConfig {

@@ -340,14 +340,8 @@ private:
 
     static ReferenceTrajectoryConfig makeReferenceConfig(const EidControllerConfig& cfg,
                                                          const PlantModelConfig& model) {
-        constexpr double kRefMin = -10.0;
-        constexpr double kRefMax = 10.0;
-        constexpr double kMaxFrequency = 0.8;
-        constexpr double kDefaultFrequency = 0.05;
-        constexpr double kStartAtMinPhase = -1.57079632679489661923;
-
-        const double q_min = std::max(kRefMin, model.q_min);
-        const double q_max = std::min(kRefMax, model.q_max);
+        const double q_min = model.q_min;
+        const double q_max = model.q_max;
         const double default_center = 0.5 * (q_min + q_max);
         const double default_amplitude = 0.5 * (q_max - q_min);
 
@@ -375,12 +369,10 @@ private:
             ref.amplitude = 0.0;
         }
 
-        const double requested_frequency =
-            (std::isfinite(cfg.ref_frequency) && cfg.ref_frequency > 0.0)
-                ? cfg.ref_frequency
-                : kDefaultFrequency;
-        ref.frequency = std::min(requested_frequency, kMaxFrequency);
-        ref.phase = std::isfinite(cfg.ref_phase) ? cfg.ref_phase : kStartAtMinPhase;
+        ref.frequency = std::isfinite(cfg.ref_frequency) && cfg.ref_frequency > 0.0
+                            ? cfg.ref_frequency
+                            : 0.05;
+        ref.phase = std::isfinite(cfg.ref_phase) ? cfg.ref_phase : -1.57079632679489661923;
         return ref;
     }
 
