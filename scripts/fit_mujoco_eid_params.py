@@ -288,16 +288,16 @@ def fit_joint(
 ) -> FitResult:
     data = mujoco.MjData(model)
     qpos0 = base_qpos(model)
-    ref_center, ref_amp, _, _ = REFERENCE_DEFAULTS[info.index]
+    policy_center, policy_amp, _, _ = REFERENCE_DEFAULTS[info.index]
     q_width = info.q_max - info.q_min
     hard_margin = max(0.01, margin_fraction * q_width)
     safe_min = info.q_min + hard_margin
     safe_max = info.q_max - hard_margin
     if safe_min >= safe_max:
         safe_min, safe_max = info.q_min, info.q_max
-    local_half_width = max(0.12, min(0.60, 0.20 * q_width), 3.0 * ref_amp)
-    q_lo = max(safe_min, ref_center - local_half_width)
-    q_hi = min(safe_max, ref_center + local_half_width)
+    local_half_width = max(0.12, min(0.60, 0.20 * q_width), 3.0 * policy_amp)
+    q_lo = max(safe_min, policy_center - local_half_width)
+    q_hi = min(safe_max, policy_center + local_half_width)
     if q_lo >= q_hi:
         q_lo, q_hi = safe_min, safe_max
 
@@ -386,25 +386,26 @@ def write_config(
         "  kd: 1.0",
         "  lowstate_timeout: 0.05",
         "",
-        "eid_defaults:",
-        "  kp: 45.0",
-        "  kd: 8.0",
-        "  observer_gain_q: 0.25",
-        "  observer_gain_dq: 0.25",
-        "  filter_alpha: 0.5",
-        "  reference_mode: open_loop",
-        "  reference_signal: sine",
-        "  policy_reference_dt: 0.05",
-        "  closed_loop_reference_tau: 0.05",
-        "  ref_step_time: 1.0",
-        "  startup_ramp_duration: 4.0",
-        "  eid_tau_slew_rate: 0",
-        "  torque_safe_kp: 0.0",
-        "  torque_safe_kd: 0.8",
-        "  inverse_q_weight: 0.0",
-        "  inverse_dq_weight: 0.0",
+        "controller:",
+        "  kind: eid",
+        "  defaults:",
+        "    kp: 45.0",
+        "    kd: 8.0",
+        "    observer_gain_q: 0.25",
+        "    observer_gain_dq: 0.25",
+        "    filter_alpha: 0.5",
+        "    policy_interpolation: open_loop",
+        "    policy_source: sine",
+        "    policy_dt: 0.05",
+        "    policy_step_time_s: 1.0",
+        "    startup_blend_duration_s: 0.0",
+        "    tau_slew_rate: 0",
+        "    torque_safe_kp: 0.0",
+        "    torque_safe_kd: 0.8",
+        "    inverse_q_weight: 0.0",
+        "    inverse_dq_weight: 0.0",
         "",
-        "eid_controllers:",
+        "  joints:",
     ]
 
     by_joint = {r.info.index: r for r in results}
@@ -413,32 +414,30 @@ def write_config(
         center, amp, freq, phase = REFERENCE_DEFAULTS[joint_id]
         lines.extend(
             [
-                f"  {joint_id}:",
-                f"    name: {DISPLAY_NAMES[joint_id]}",
-                f"    enabled: {'true' if enabled_overrides.get(joint_id, True) else 'false'}",
-                "    kp: 45.0",
-                "    kd: 8.0",
-                "    observer_gain_q: 0.25",
-                "    observer_gain_dq: 0.25",
-                "    filter_alpha: 0.5",
-                "    inverse_q_weight: 0.0",
-                "    inverse_dq_weight: 0.0",
-                "    reference_signal: sine",
-                f"    ref_center: {yaml_float(center)}",
-                f"    ref_amplitude: {yaml_float(amp)}",
-                f"    ref_frequency: {yaml_float(freq)}",
-                f"    ref_phase: {yaml_float(phase)}",
-                "    ref_step_time: 1.0",
-                f"    eid_tau_limit: {yaml_float(r.tau_max)}",
-                "    plant:",
-                f"      Jeff: {yaml_float(r.Jeff)}",
-                f"      b: {yaml_float(r.b)}",
-                f"      gravityA: {yaml_float(r.gravityA)}",
-                f"      gravityB: {yaml_float(r.gravityB)}",
-                f"      tau0: {yaml_float(r.tau0)}",
-                f"      q_min: {yaml_float(r.info.q_min)}",
-                f"      q_max: {yaml_float(r.info.q_max)}",
-                f"      tau_max: {yaml_float(r.tau_max)}",
+                f"    {joint_id}:",
+                f"      name: {DISPLAY_NAMES[joint_id]}",
+                f"      enabled: {'true' if enabled_overrides.get(joint_id, True) else 'false'}",
+                "      kp: 45.0",
+                "      kd: 8.0",
+                "      observer_gain_q: 0.25",
+                "      observer_gain_dq: 0.25",
+                "      filter_alpha: 0.5",
+                "      inverse_q_weight: 0.0",
+                "      inverse_dq_weight: 0.0",
+                f"      policy_center: {yaml_float(center)}",
+                f"      policy_amplitude: {yaml_float(amp)}",
+                f"      policy_frequency_hz: {yaml_float(freq)}",
+                f"      policy_phase_rad: {yaml_float(phase)}",
+                f"      tau_limit: {yaml_float(r.tau_max)}",
+                "      plant:",
+                f"        Jeff: {yaml_float(r.Jeff)}",
+                f"        b: {yaml_float(r.b)}",
+                f"        gravityA: {yaml_float(r.gravityA)}",
+                f"        gravityB: {yaml_float(r.gravityB)}",
+                f"        tau0: {yaml_float(r.tau0)}",
+                f"        q_min: {yaml_float(r.info.q_min)}",
+                f"        q_max: {yaml_float(r.info.q_max)}",
+                f"        tau_max: {yaml_float(r.tau_max)}",
             ]
         )
 

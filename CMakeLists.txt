@@ -19,10 +19,10 @@ add_executable(h1_mock_closed_loop
 )
 target_link_libraries(h1_mock_closed_loop PRIVATE h1if_core Threads::Threads)
 
-add_executable(h1_eid_stepper
-    src/eid_stepper.cpp
+add_executable(h1_controller_stepper
+    src/controller_stepper.cpp
 )
-target_link_libraries(h1_eid_stepper PRIVATE h1if_core)
+target_link_libraries(h1_controller_stepper PRIVATE h1if_core)
 
 add_executable(h1_safety_tests
     tests/test_safety.cpp

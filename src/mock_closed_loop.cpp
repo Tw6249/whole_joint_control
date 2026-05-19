@@ -1,5 +1,5 @@
 #include "async_csv_logger.hpp"
-#include "eid_controller.hpp"
+#include "controller_factory.hpp"
 #include "runtime_config.hpp"
 #include "safety.hpp"
 
@@ -27,14 +27,16 @@ double gravityTorque(const h1if::PlantModelConfig& model, double q) {
     return model.gravityA * std::sin(q) + model.gravityB * std::cos(q);
 }
 
-double initialMockPosition(const h1if::JointEidConfig& joint_cfg) {
+double initialMockPosition(const h1if::JointControllerConfig& joint_cfg) {
     const auto& controller = joint_cfg.controller;
     const auto& plant = joint_cfg.plant;
-    double q0 = controller.ref_center;
-    if (controller.reference_signal == h1if::ReferenceSignal::Sine) {
-        q0 = controller.ref_center + controller.ref_amplitude * std::sin(controller.ref_phase);
-    } else if (controller.ref_step_time <= 0.0) {
-        q0 = controller.ref_center + controller.ref_amplitude;
+    double q0 = controller.policy_center;
+    if (controller.policy_source == h1if::PolicySource::Sine) {
+        q0 = controller.policy_center +
+             controller.policy_amplitude * std::sin(controller.policy_phase_rad);
+    } else if (controller.policy_source == h1if::PolicySource::Step &&
+               controller.policy_step_time_s <= 0.0) {
+        q0 = controller.policy_center + controller.policy_amplitude;
     }
     return clamp(q0, plant.q_min, plant.q_max);
 }
@@ -72,13 +74,16 @@ int main(int argc, char** argv) {
         }
         cfg.log_path = h1if::resolveLogPath(cfg);
 
-        const std::vector<int> active_joints = h1if::activeEidJoints(cfg);
+        const std::vector<int> active_joints = h1if::activeControllerJoints(cfg);
         const double dt = cfg.control_dt;
         const int steps = static_cast<int>(std::ceil(cfg.mock_duration / dt));
 
         std::array<PlantState, h1if::kMaxMotors> plants{};
         for (int j : active_joints) {
-            plants[j] = PlantState{initialMockPosition(*cfg.eid_controllers[j]), 0.0, 0.0};
+            if (!cfg.controller.joints[j]->has_plant) {
+                throw std::runtime_error("mock_closed_loop requires controller.joints." + std::to_string(j) + ".plant");
+            }
+            plants[j] = PlantState{initialMockPosition(*cfg.controller.joints[j]), 0.0, 0.0};
         }
 
         h1if::RobotState state;
@@ -91,8 +96,8 @@ int main(int argc, char** argv) {
             state.joint[j].tau_est = plants[j].tau_est;
         }
 
-        h1if::EidMultiJointController controller(cfg);
-        controller.reset(state);
+        const auto controller = h1if::createController(cfg);
+        controller->reset(state);
 
         h1if::AsyncCsvLogger<> logger;
         if (!logger.start(cfg.log_path)) {
@@ -117,19 +122,19 @@ int main(int argc, char** argv) {
 
             h1if::RobotCommand command;
             h1if::ControllerDebug debug;
-            controller.step(state, command, debug);
+            controller->step(state, command, debug);
             h1if::applySafety(state, command, debug, cfg.safety);
 
             combined_flags |= debug.flags;
 
             for (int j : active_joints) {
                 const auto joint_command = command.joint[j];
-                stepPlant(cfg.eid_controllers[j]->plant, joint_command, dt, plants[j]);
+                stepPlant(cfg.controller.joints[j]->plant, joint_command, dt, plants[j]);
 
                 const double q_ref = debug.joint[j].data[0];
                 const double err = q_ref - state.joint[j].q;
                 q_error_energy += err * err;
-                max_abs_tau = std::max(max_abs_tau, std::abs(static_cast<double>(joint_command.tau)));
+                max_abs_tau = std::max(max_abs_tau, std::abs(plants[j].tau_est));
                 combined_flags |= debug.joint[j].flags;
 
                 h1if::LogSample sample;

@@ -50,7 +50,7 @@ class KneeStateSubscriber {
 public:
     explicit KneeStateSubscriber(h1if::RuntimeConfig cfg)
         : cfg_(std::move(cfg)),
-          joint_id_(h1if::primaryEidJoint(cfg_)) {}
+          joint_id_(h1if::primaryControllerJoint(cfg_)) {}
 
     void init() {
         unitree::robot::ChannelFactory::Instance()->Init(
@@ -65,7 +65,7 @@ public:
         std::cout << "Listening to " << kTopicLowState
                   << " on interface " << cfg_.network_interface
                   << ", domain " << cfg_.domain_id << "\n"
-                  << "Target joint: " << joint_id_ << " (primary eid_controllers joint)\n";
+                  << "Target joint: " << joint_id_ << " (primary controller joint)\n";
     }
 
     void run() {
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage:\n"
                   << "  " << argv[0] << " <config.yaml>\n\n"
-                  << "The subscriber is read-only. It uses the primary eid_controllers joint from the YAML.\n";
+                  << "The subscriber is read-only. It uses the primary controller joint from the YAML.\n";
         return 1;
     }
 

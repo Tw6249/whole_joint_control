@@ -15,7 +15,6 @@
       "Bash(cmake --build build-h1)",
       "Bash(build-h1\\\\Debug\\\\h1_mock_closed_loop.exe config/h1_lower_body.yaml 5.0)",
       "Bash(./build-h1/Debug/h1_mock_closed_loop.exe config/h1_lower_body.yaml 5.0)",
-      "Bash(python scripts/plot_eid_log.py data/20260514_154943/h1_mock_log.csv)",
       "Bash(Remove-Item -Recurse -Force \"d:\\\\BaiduSyncdisk\\\\lower_body_control\\\\data\\\\ruckig_eval_configs\")",
       "Bash(git mv *)",
       "Bash(Remove-Item -Recurse -Force \"d:\\\\BaiduSyncdisk\\\\lower_body_control\\\\build-h1\" -ErrorAction SilentlyContinue)",
@@ -47,7 +46,12 @@
       "PowerShell(cmake --build build --config Debug --target h1_safety_tests 2>$null; $p = Start-Process -FilePath \"build\\\\Debug\\\\h1_safety_tests.exe\" -WorkingDirectory \"c:\\\\Users\\\\twx\\\\Desktop\\\\whole_joint_control\" -NoNewWindow -Wait -PassThru -RedirectStandardOutput \"C:\\\\Users\\\\twx\\\\AppData\\\\Local\\\\Temp\\\\to3.txt\"; Write-Host \"Exit: $\\($p.ExitCode\\)\"; Get-Content \"C:\\\\Users\\\\twx\\\\AppData\\\\Local\\\\Temp\\\\to3.txt\")",
       "PowerShell(cmake --build build --config Debug 2>&1 | Select-Object -Last 5; Write-Host \"---\"; $p = Start-Process -FilePath \"build\\\\Debug\\\\h1_safety_tests.exe\" -WorkingDirectory \"c:\\\\Users\\\\twx\\\\Desktop\\\\whole_joint_control\" -NoNewWindow -Wait -PassThru -RedirectStandardOutput \"C:\\\\Users\\\\twx\\\\AppData\\\\Local\\\\Temp\\\\to4.txt\"; Write-Host \"Exit: $\\($p.ExitCode\\)\"; Get-Content \"C:\\\\Users\\\\twx\\\\AppData\\\\Local\\\\Temp\\\\to4.txt\")",
       "PowerShell(python scripts\\\\run_lower_body_mujoco_test.py --config config\\\\h1_full_body_mujoco_fit.yaml --duration 10.0 --dt 0.002 --fps 24 --run-name test_yaml_sole_source)",
-      "PowerShell(ffmpeg -i \"data\\\\mujoco_fit\\\\runs\\\\test_yaml_sole_source\\\\eid_mujoco_closed_loop.mp4\" -vf \"fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"data\\\\mujoco_fit\\\\runs\\\\test_yaml_sole_source\\\\eid_mujoco_closed_loop.gif\" -y 2>$null)"
+      "PowerShell(ffmpeg -i \"data\\\\mujoco_fit\\\\runs\\\\test_yaml_sole_source\\\\eid_mujoco_closed_loop.mp4\" -vf \"fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"data\\\\mujoco_fit\\\\runs\\\\test_yaml_sole_source\\\\eid_mujoco_closed_loop.gif\" -y 2>$null)",
+      "Bash(rm -rf build)",
+      "Bash(mkdir build *)",
+      "Bash(cmake .. -G \"Ninja\")",
+      "Bash(cmake ..)",
+      "Bash(cmake --build . --target h1_mock_closed_loop --target h1_eid_stepper --target h1_safety_tests)"
     ]
   }
 }

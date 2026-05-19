@@ -17,7 +17,13 @@ public:
     void reset(const RobotState& state) override {
         q0_ = state.joint[joint_id_].q;
         t0_ = state.t;
-        reference_.configure({0.05, q0_, 0.08, 0.10});
+        PolicyReferenceConfig ref_cfg;
+        ref_cfg.source = PolicySource::Sine;
+        ref_cfg.policy_dt = 0.05;
+        ref_cfg.center = q0_;
+        ref_cfg.amplitude = 0.08;
+        ref_cfg.frequency_hz = 0.10;
+        reference_.configure(ref_cfg);
         reference_.reset();
     }
 
@@ -33,7 +39,8 @@ public:
         }
 
         const double t = state.t - t0_;
-        const JointReferencePair ref = reference_.sample(t, state.dt);
+        const JointReferencePair ref =
+            reference_.sample(t, state.dt, state.joint[joint_id_].q, state.joint[joint_id_].dq);
         const double q_ref = ref.now.q;
         const double dq_ref = ref.now.dq;
 
@@ -60,7 +67,7 @@ private:
     int joint_id_ = 2;
     double q0_ = 0.0;
     double t0_ = 0.0;
-    SmoothSineReferenceTrajectory reference_;
+    PolicyReferenceInterpolator reference_;
 };
 
 }  // namespace h1if

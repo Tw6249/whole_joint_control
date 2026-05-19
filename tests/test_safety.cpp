@@ -1,4 +1,4 @@
-#include "eid_controller.hpp"
+#include "controller_factory.hpp"
 #include "runtime_config.hpp"
 #include "safety.hpp"
 
@@ -94,23 +94,79 @@ int main() {
     assert(h1if::h1MotorMode(11) == 0x0A);
     assert(h1if::h1MotorMode(12) == 0x01);
 
-    assert(h1if::parseReferenceMode("open_loop") == h1if::ReferenceMode::OpenLoop);
-    assert(h1if::parseReferenceMode("closed-loop") == h1if::ReferenceMode::ClosedLoop);
-    assert(h1if::parseReferenceSignal("sine") == h1if::ReferenceSignal::Sine);
-    assert(h1if::parseReferenceSignal("step") == h1if::ReferenceSignal::Step);
+    assert(h1if::parsePolicyInterpolation("open_loop") == h1if::PolicyInterpolation::OpenLoop);
+    assert(h1if::parsePolicyInterpolation("closed-loop") == h1if::PolicyInterpolation::ClosedLoop);
+    assert(h1if::parsePolicySource("hold") == h1if::PolicySource::Hold);
+    assert(h1if::parsePolicySource("sine") == h1if::PolicySource::Sine);
+    assert(h1if::parsePolicySource("step") == h1if::PolicySource::Step);
 
     {
-        h1if::ReferenceTrajectoryConfig step_cfg;
-        step_cfg.signal = h1if::ReferenceSignal::Step;
+        h1if::PolicyReferenceConfig step_cfg;
+        step_cfg.source = h1if::PolicySource::Step;
         step_cfg.policy_dt = 0.05;
         step_cfg.center = 0.5;
         step_cfg.amplitude = -0.2;
-        step_cfg.step_time = 0.10;
-        h1if::SmoothSineReferenceTrajectory step_ref(step_cfg);
-        const auto before = step_ref.sample(0.02, 0.002);
-        const auto after = step_ref.sample(0.20, 0.002);
+        step_cfg.step_time_s = 0.10;
+        h1if::PolicyReferenceInterpolator step_ref(step_cfg);
+        const auto before = step_ref.sample(0.02, 0.002, 0.5, 0.0);
+        const auto after = step_ref.sample(0.20, 0.002, 0.3, 0.0);
         assert(std::abs(before.now.q - 0.5) < 1.0e-9);
         assert(std::abs(after.now.q - 0.3) < 1.0e-9);
+    }
+
+    {
+        h1if::PolicyReferenceConfig step_cfg;
+        step_cfg.source = h1if::PolicySource::Step;
+        step_cfg.policy_dt = 0.05;
+        step_cfg.center = 0.5;
+        step_cfg.amplitude = -0.2;
+        step_cfg.step_time_s = 0.12;
+        h1if::PolicyReferenceInterpolator step_ref(step_cfg);
+        const auto before = step_ref.sample(0.148, 0.002, 0.5, 0.0);
+        const auto entering = step_ref.sample(0.152, 0.002, 0.5, 0.0);
+        const auto finished = step_ref.sample(0.202, 0.002, 0.3, 0.0);
+        assert(std::abs(before.now.q - 0.5) < 1.0e-9);
+        assert(std::abs(before.now.dq) < 1.0e-9);
+        assert(entering.now.q < 0.5);
+        assert(entering.now.q > 0.3);
+        assert(entering.now.dq < 0.0);
+        assert(std::abs(finished.now.q - 0.3) < 1.0e-9);
+        assert(std::abs(finished.now.dq) < 1.0e-9);
+    }
+
+    {
+        h1if::PolicyReferenceConfig sine_cfg;
+        sine_cfg.source = h1if::PolicySource::Sine;
+        sine_cfg.policy_dt = 0.20;
+        sine_cfg.center = 0.1;
+        sine_cfg.amplitude = 0.05;
+        sine_cfg.frequency_hz = 0.2;
+        sine_cfg.phase_rad = -1.5707963267948966;
+        h1if::PolicyReferenceInterpolator sine_ref(sine_cfg);
+        for (int i = 0; i <= 200; ++i) {
+            const auto sample = sine_ref.sample(0.002 * i, 0.002, 0.1, 0.0);
+            assert(std::isfinite(sample.now.q));
+            assert(std::isfinite(sample.now.dq));
+            assert(sample.now.q >= 0.03);
+            assert(sample.now.q <= 0.17);
+        }
+    }
+
+    {
+        h1if::PolicyReferenceConfig cfg;
+        cfg.interpolation = h1if::PolicyInterpolation::ClosedLoop;
+        cfg.source = h1if::PolicySource::Step;
+        cfg.policy_dt = 0.05;
+        cfg.center = 0.0;
+        cfg.amplitude = 1.0;
+        cfg.step_time_s = 0.0;
+        h1if::PolicyReferenceInterpolator ref(cfg);
+        const auto first = ref.sample(0.051, 0.002, 0.2, 0.0);
+        const auto same_segment = ref.sample(0.070, 0.002, 0.7, 0.0);
+        const auto next_segment = ref.sample(0.101, 0.002, 0.7, 0.0);
+        assert(first.now.q > 0.2);
+        assert(same_segment.now.q < 0.7);
+        assert(next_segment.now.q > 0.7);
     }
 
     const std::string valid_multi_config = R"YAML(
@@ -126,100 +182,100 @@ safe_hold:
   kd: 1.0
   lowstate_timeout: 0.05
 
-eid_defaults:
-  kp: 40.0
-  kd: 6.0
-  observer_gain_q: 0.25
-  observer_gain_dq: 0.25
-  filter_alpha: 0.5
-  reference_mode: open_loop
-  reference_signal: sine
-  policy_reference_dt: 0.05
-  closed_loop_reference_tau: 0.05
-  ref_step_time: 0.25
-  startup_ramp_duration: 0.0
-  eid_tau_slew_rate: 60.0
-  torque_safe_kp: 0.0
-  torque_safe_kd: 0.8
-  inverse_q_weight: 0.0
-  inverse_dq_weight: 0.0
-
-eid_controllers:
-  2:
-    name: RightKnee
-    kp: 51.0
-    kd: 7.0
-    observer_gain_q: 0.31
-    observer_gain_dq: 0.32
-    filter_alpha: 0.61
-    inverse_q_weight: 0.03
-    inverse_dq_weight: 0.04
-    reference_signal: step
-    ref_center: 0.8
-    ref_amplitude: -0.1
-    ref_frequency: 0.1
-    ref_phase: 0.0
-    ref_step_time: 0.12
-    eid_tau_limit: 8.0
-    plant:
-      Jeff: 0.238
-      b: 1.0
-      gravityA: 4.2835
-      gravityB: 0.0
-      tau0: -0.2711
-      q_min: -0.26
-      q_max: 2.05
-      tau_max: 8.0
-  5:
-    name: LeftKnee
-    kp: 52.0
-    kd: 7.5
-    observer_gain_q: 0.41
-    observer_gain_dq: 0.42
-    filter_alpha: 0.62
-    inverse_q_weight: 0.05
-    inverse_dq_weight: 0.06
-    reference_signal: sine
-    ref_center: 0.6
-    ref_amplitude: 0.1
-    ref_frequency: 0.1
-    ref_phase: 0.0
-    eid_tau_limit: 6.0
-    plant:
-      Jeff: 0.3
-      b: 1.2
-      gravityA: 3.0
-      gravityB: 0.0
-      tau0: 0.1
-      q_min: -0.26
-      q_max: 2.05
-      tau_max: 6.0
-  6:
-    name: WaistYaw
-    kp: 30.0
-    kd: 4.0
+controller:
+  kind: eid
+  defaults:
+    kp: 40.0
+    kd: 6.0
     observer_gain_q: 0.25
     observer_gain_dq: 0.25
     filter_alpha: 0.5
-    reference_signal: step
-    ref_center: 0.0
-    ref_amplitude: 0.1
-    ref_frequency: 0.1
-    ref_phase: 0.0
-    ref_step_time: 0.0
-    eid_tau_limit: 5.0
-    plant:
-      Jeff: 0.8
-      b: 1.0
-      gravityA: 0.0
-      gravityB: 0.0
-      tau0: 0.0
-      q_min: -2.35
-      q_max: 2.35
-      tau_max: 5.0
-  12:
-    name: RightShoulderPitch
-    enabled: false
+    policy_interpolation: open_loop
+    policy_source: sine
+    policy_dt: 0.05
+    policy_step_time_s: 0.25
+    startup_blend_duration_s: 0.0
+    tau_slew_rate: 60.0
+    torque_safe_kp: 0.0
+    torque_safe_kd: 0.8
+    inverse_q_weight: 0.0
+    inverse_dq_weight: 0.0
+  joints:
+    2:
+      name: RightKnee
+      kp: 51.0
+      kd: 7.0
+      observer_gain_q: 0.31
+      observer_gain_dq: 0.32
+      filter_alpha: 0.61
+      inverse_q_weight: 0.03
+      inverse_dq_weight: 0.04
+      policy_source: step
+      policy_center: 0.8
+      policy_amplitude: -0.1
+      policy_frequency_hz: 0.1
+      policy_phase_rad: 0.0
+      policy_step_time_s: 0.12
+      tau_limit: 8.0
+      plant:
+        Jeff: 0.238
+        b: 1.0
+        gravityA: 4.2835
+        gravityB: 0.0
+        tau0: -0.2711
+        q_min: -0.26
+        q_max: 2.05
+        tau_max: 8.0
+    5:
+      name: LeftKnee
+      kp: 52.0
+      kd: 7.5
+      observer_gain_q: 0.41
+      observer_gain_dq: 0.42
+      filter_alpha: 0.62
+      inverse_q_weight: 0.05
+      inverse_dq_weight: 0.06
+      policy_source: sine
+      policy_center: 0.6
+      policy_amplitude: 0.1
+      policy_frequency_hz: 0.1
+      policy_phase_rad: 0.0
+      tau_limit: 6.0
+      plant:
+        Jeff: 0.3
+        b: 1.2
+        gravityA: 3.0
+        gravityB: 0.0
+        tau0: 0.1
+        q_min: -0.26
+        q_max: 2.05
+        tau_max: 6.0
+    6:
+      name: WaistYaw
+      kp: 30.0
+      kd: 4.0
+      observer_gain_q: 0.25
+      observer_gain_dq: 0.25
+      filter_alpha: 0.5
+      policy_source: step
+      policy_center: 0.0
+      policy_amplitude: 0.1
+      policy_frequency_hz: 0.1
+      policy_phase_rad: 0.0
+      policy_step_time_s: 0.0
+      tau_limit: 5.0
+      plant:
+        Jeff: 0.8
+        b: 1.0
+        gravityA: 0.0
+        gravityB: 0.0
+        tau0: 0.0
+        q_min: -2.35
+        q_max: 2.35
+        tau_max: 5.0
+    12:
+      name: RightShoulderPitch
+      enabled: false
 
 joint_limits:
   2:
@@ -247,31 +303,32 @@ joint_limits:
 
     const auto valid_path = writeTempConfig("h1if_valid_multi.yaml", valid_multi_config);
     h1if::RuntimeConfig runtime_cfg = h1if::loadRuntimeConfig(valid_path.string());
-    const auto active = h1if::activeEidJoints(runtime_cfg);
+    const auto active = h1if::activeControllerJoints(runtime_cfg);
     assert(active.size() == 3);
     assert(active[0] == 2);
     assert(active[1] == 5);
     assert(active[2] == 6);
-    assert(h1if::primaryEidJoint(runtime_cfg) == 2);
-    assert(runtime_cfg.eid_controllers[6]->enabled);
-    assert(!runtime_cfg.eid_controllers[12]->enabled);
-    assert(runtime_cfg.eid_controllers[2]->controller.kp == 51.0);
-    assert(runtime_cfg.eid_controllers[2]->controller.kd == 7.0);
-    assert(runtime_cfg.eid_controllers[2]->controller.observer_gain_q == 0.31);
-    assert(runtime_cfg.eid_controllers[2]->controller.observer_gain_dq == 0.32);
-    assert(runtime_cfg.eid_controllers[2]->controller.filter_alpha == 0.61);
-    assert(runtime_cfg.eid_controllers[2]->controller.inverse_q_weight == 0.03);
-    assert(runtime_cfg.eid_controllers[2]->controller.inverse_dq_weight == 0.04);
-    assert(runtime_cfg.eid_controllers[2]->controller.reference_signal == h1if::ReferenceSignal::Step);
-    assert(runtime_cfg.eid_controllers[2]->controller.ref_step_time == 0.12);
-    assert(runtime_cfg.eid_controllers[5]->controller.kp == 52.0);
-    assert(runtime_cfg.eid_controllers[5]->controller.kd == 7.5);
-    assert(runtime_cfg.eid_controllers[5]->controller.observer_gain_q == 0.41);
-    assert(runtime_cfg.eid_controllers[5]->controller.observer_gain_dq == 0.42);
-    assert(runtime_cfg.eid_controllers[5]->controller.filter_alpha == 0.62);
-    assert(runtime_cfg.eid_controllers[5]->controller.inverse_q_weight == 0.05);
-    assert(runtime_cfg.eid_controllers[5]->controller.inverse_dq_weight == 0.06);
-    assert(runtime_cfg.eid_controllers[5]->controller.reference_signal == h1if::ReferenceSignal::Sine);
+    assert(h1if::primaryControllerJoint(runtime_cfg) == 2);
+    assert(runtime_cfg.controller.kind == h1if::ControllerKind::Eid);
+    assert(runtime_cfg.controller.joints[6]->enabled);
+    assert(!runtime_cfg.controller.joints[12]->enabled);
+    assert(runtime_cfg.controller.joints[2]->controller.kp == 51.0);
+    assert(runtime_cfg.controller.joints[2]->controller.kd == 7.0);
+    assert(runtime_cfg.controller.joints[2]->controller.observer_gain_q == 0.31);
+    assert(runtime_cfg.controller.joints[2]->controller.observer_gain_dq == 0.32);
+    assert(runtime_cfg.controller.joints[2]->controller.filter_alpha == 0.61);
+    assert(runtime_cfg.controller.joints[2]->controller.inverse_q_weight == 0.03);
+    assert(runtime_cfg.controller.joints[2]->controller.inverse_dq_weight == 0.04);
+    assert(runtime_cfg.controller.joints[2]->controller.policy_source == h1if::PolicySource::Step);
+    assert(runtime_cfg.controller.joints[2]->controller.policy_step_time_s == 0.12);
+    assert(runtime_cfg.controller.joints[5]->controller.kp == 52.0);
+    assert(runtime_cfg.controller.joints[5]->controller.kd == 7.5);
+    assert(runtime_cfg.controller.joints[5]->controller.observer_gain_q == 0.41);
+    assert(runtime_cfg.controller.joints[5]->controller.observer_gain_dq == 0.42);
+    assert(runtime_cfg.controller.joints[5]->controller.filter_alpha == 0.62);
+    assert(runtime_cfg.controller.joints[5]->controller.inverse_q_weight == 0.05);
+    assert(runtime_cfg.controller.joints[5]->controller.inverse_dq_weight == 0.06);
+    assert(runtime_cfg.controller.joints[5]->controller.policy_source == h1if::PolicySource::Sine);
 
     {
         auto state = validState();
@@ -279,9 +336,9 @@ joint_limits:
         state.dt = runtime_cfg.control_dt;
         h1if::RobotCommand cmd;
         h1if::ControllerDebug debug;
-        h1if::EidMultiJointController controller(runtime_cfg);
-        controller.reset(state);
-        controller.step(state, cmd, debug);
+        const auto controller = h1if::createController(runtime_cfg);
+        controller->reset(state);
+        controller->step(state, cmd, debug);
         h1if::applySafety(state, cmd, debug, runtime_cfg.safety);
 
         assert(std::abs(cmd.joint[2].tau) > 0.0f);
@@ -293,13 +350,61 @@ joint_limits:
         assert(debug.joint[2].data[0] != debug.joint[5].data[0]);
     }
 
-    const auto legacy_path = writeTempConfig("h1if_legacy_config.yaml", R"YAML(
+    const std::string position_pd_config = R"YAML(
 robot: H1
 control_dt: 0.002
 controller:
-  target_joint: 2
-plant:
-  Jeff: 0.238
+  kind: position_pd
+  defaults:
+    kp: 18.0
+    kd: 2.0
+    policy_source: sine
+    policy_dt: 0.05
+    policy_center: 0.5
+    policy_amplitude: 0.05
+    policy_frequency_hz: 0.1
+  joints:
+    2:
+      name: RightKnee
+      enabled: true
+
+joint_limits:
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 8.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto position_pd_path = writeTempConfig("h1if_position_pd.yaml", position_pd_config);
+    h1if::RuntimeConfig pd_cfg = h1if::loadRuntimeConfig(position_pd_path.string());
+    assert(pd_cfg.controller.kind == h1if::ControllerKind::PositionPd);
+    {
+        auto state = validState();
+        state.t = 0.0;
+        state.dt = pd_cfg.control_dt;
+        h1if::RobotCommand cmd;
+        h1if::ControllerDebug debug;
+        const auto controller = h1if::createController(pd_cfg);
+        controller->reset(state);
+        controller->step(state, cmd, debug);
+        h1if::applySafety(state, cmd, debug, pd_cfg.safety);
+
+        assert(cmd.joint[2].kp == 18.0f);
+        assert(cmd.joint[2].kd == 2.0f);
+        assert(cmd.joint[2].tau == 0.0f);
+        assert(cmd.joint[2].q != static_cast<float>(state.joint[2].q));
+    }
+
+    const auto legacy_path = writeTempConfig("h1if_legacy_config.yaml", R"YAML(
+robot: H1
+control_dt: 0.002
+eid_defaults:
+  kp: 40.0
+eid_controllers:
+  2:
+    tau_limit: 1.0
 )YAML");
     bool rejected_legacy = false;
     try {
@@ -312,9 +417,11 @@ plant:
     const auto missing_plant_path = writeTempConfig("h1if_missing_plant.yaml", R"YAML(
 robot: H1
 control_dt: 0.002
-eid_controllers:
-  2:
-    ref_center: 0.8
+controller:
+  kind: eid
+  joints:
+    2:
+      policy_center: 0.8
 )YAML");
     bool rejected_missing_plant = false;
     try {
@@ -327,22 +434,24 @@ eid_controllers:
     const auto disabled_primary_path = writeTempConfig("h1if_disabled_primary.yaml", R"YAML(
 robot: H1
 control_dt: 0.002
-eid_controllers:
-  2:
-    name: DisabledRightKnee
-    enabled: false
-  5:
-    name: LeftKnee
-    eid_tau_limit: 6.0
-    plant:
-      Jeff: 0.3
-      b: 1.2
-      gravityA: 3.0
-      gravityB: 0.0
-      tau0: 0.1
-      q_min: -0.26
-      q_max: 2.05
-      tau_max: 6.0
+controller:
+  kind: eid
+  joints:
+    2:
+      name: DisabledRightKnee
+      enabled: false
+    5:
+      name: LeftKnee
+      tau_limit: 6.0
+      plant:
+        Jeff: 0.3
+        b: 1.2
+        gravityA: 3.0
+        gravityB: 0.0
+        tau0: 0.1
+        q_min: -0.26
+        q_max: 2.05
+        tau_max: 6.0
 
 joint_limits:
   5:
@@ -354,27 +463,29 @@ joint_limits:
     kd_max: 5.0
 )YAML");
     h1if::RuntimeConfig disabled_primary_cfg = h1if::loadRuntimeConfig(disabled_primary_path.string());
-    assert(h1if::primaryEidJoint(disabled_primary_cfg) == 5);
+    assert(h1if::primaryControllerJoint(disabled_primary_cfg) == 5);
 
     const auto invalid_joint_path = writeTempConfig("h1if_invalid_joint.yaml", R"YAML(
 robot: H1
 control_dt: 0.002
-eid_controllers:
-  9:
-    ref_center: 0.0
-    ref_amplitude: 0.1
-    ref_frequency: 0.1
-    ref_phase: 0.0
-    eid_tau_limit: 1.0
-    plant:
-      Jeff: 0.1
-      b: 1.0
-      gravityA: 0.0
-      gravityB: 0.0
-      tau0: 0.0
-      q_min: -1.0
-      q_max: 1.0
-      tau_max: 1.0
+controller:
+  kind: eid
+  joints:
+    9:
+      policy_center: 0.0
+      policy_amplitude: 0.1
+      policy_frequency_hz: 0.1
+      policy_phase_rad: 0.0
+      tau_limit: 1.0
+      plant:
+        Jeff: 0.1
+        b: 1.0
+        gravityA: 0.0
+        gravityB: 0.0
+        tau0: 0.0
+        q_min: -1.0
+        q_max: 1.0
+        tau_max: 1.0
 )YAML");
     bool rejected_invalid_joint = false;
     try {

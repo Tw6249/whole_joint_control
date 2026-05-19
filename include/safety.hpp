@@ -29,7 +29,24 @@ struct SafetyConfig {
     std::array<JointLimit, kMaxMotors> limit{};
     float hold_kp = 10.0f;
     float hold_kd = 1.0f;
+
+    // Timeout (seconds) for LowState messages. If no valid state is received
+    // within this window, the controller trips into safe-hold.
     double lowstate_timeout = 0.05;
+
+    // Hard trip: measured joint speed (rad/s) above this value immediately
+    // triggers safe-hold. Set to a value larger than any physically possible
+    // speed to disable this check.
+    double measured_speed_trip = 8.0;
+
+    // Hard trip: measured joint position jump (rad) between two consecutive
+    // cycles above this value triggers safe-hold. Guards against sensor
+    // glitches or communication corruption.
+    double measured_jump_trip = 0.10;
+
+    // Hard trip: control-loop interval (seconds) above this value triggers
+    // safe-hold. Protects against scheduler jitter or thread starvation.
+    double max_control_dt = 0.010;
 };
 
 inline std::uint8_t h1MotorMode(int joint_id) {

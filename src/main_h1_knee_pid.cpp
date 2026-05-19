@@ -140,7 +140,7 @@ class H1KneePidRuntime {
 public:
     H1KneePidRuntime(h1if::RuntimeConfig cfg, const CliOptions& opts)
         : cfg_(std::move(cfg)),
-          joint_id_(h1if::primaryEidJoint(cfg_)),
+          joint_id_(h1if::primaryControllerJoint(cfg_)),
           target_q_(opts.target_q),
           run_seconds_(opts.run_seconds),
           kp_(opts.kp),
@@ -182,7 +182,7 @@ public:
 
         std::cout << std::fixed << std::setprecision(6)
                   << "h1_knee_pid armed\n"
-                  << "joint_id=" << joint_id_ << " (primary eid_controllers joint)"
+                  << "joint_id=" << joint_id_ << " (primary controller joint)"
                   << " start_q=" << start_q_
                   << " target_q=" << target_q_
                   << " run_seconds=" << run_seconds_

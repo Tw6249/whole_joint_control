@@ -63,14 +63,14 @@ INDEX_COLUMNS = [
     "joint_id",
     "joint_name",
     "controller_method",
-    "reference_mode",
+    "policy_interpolation",
     "interpolation",
     "trajectory",
     "kp",
     "kd",
-    "ref_center",
-    "ref_amplitude",
-    "ref_frequency",
+    "policy_center",
+    "policy_amplitude",
+    "policy_frequency_hz",
     "samples",
     "duration_s",
     "q_error_rmse",
@@ -137,7 +137,7 @@ def parse_simple_yaml(path: Path) -> dict[str, str]:
     """Parse the small key/value YAML subset used by this repo.
 
     This is intentionally conservative. It supports top-level keys and one level
-    of nested maps such as controller.reference_mode or target.joint_id.
+    of nested maps such as controller.policy_interpolation or target.joint_id.
     """
     if not path.exists():
         return {}
@@ -215,7 +215,7 @@ def infer_from_text(log_path: Path) -> dict[str, str]:
     inferred = {
         "object_type": "unspecified",
         "controller_method": "EID",
-        "reference_mode": "unspecified",
+        "policy_interpolation": "unspecified",
         "interpolation": "unspecified",
         "trajectory": "sine",
     }
@@ -233,9 +233,9 @@ def infer_from_text(log_path: Path) -> dict[str, str]:
         inferred["controller_method"] = "EID"
 
     if "closed_loop" in text or re.search(r"(^|_)closed($|_)", text):
-        inferred["reference_mode"] = "closed_loop"
+        inferred["policy_interpolation"] = "closed_loop"
     elif "open_loop" in text or re.search(r"(^|_)open($|_)", text):
-        inferred["reference_mode"] = "open_loop"
+        inferred["policy_interpolation"] = "open_loop"
 
     if "quintic" in text:
         inferred["interpolation"] = "quintic"
@@ -373,15 +373,15 @@ def build_index(data_root: Path) -> list[dict[str, object]]:
         inferred = infer_from_text(log_path)
         summary = summarize_log(log_path)
 
-        cfg_reference_mode = config_meta.get("controller.reference_mode", "")
+        cfg_policy_interpolation = config_meta.get("controller.policy_interpolation", "")
         cfg_interpolation = ""
-        if cfg_reference_mode in {"open_loop", "closed_loop"}:
+        if cfg_policy_interpolation in {"open_loop", "closed_loop"}:
             cfg_interpolation = "quintic"
 
-        data_reference_mode = ""
+        data_policy_interpolation = ""
         shaped_rmse = finite_float(summary.get("q_error_shaped_rmse"))
         if math.isfinite(shaped_rmse):
-            data_reference_mode = "closed_loop" if shaped_rmse < 1.0e-9 else "open_loop"
+            data_policy_interpolation = "closed_loop" if shaped_rmse < 1.0e-9 else "open_loop"
 
         joint_id = maybe_int(run_meta.get("target.joint_id"))
         if joint_id is None:
@@ -405,11 +405,11 @@ def build_index(data_root: Path) -> list[dict[str, object]]:
             "joint_id": joint_id if joint_id is not None else "",
             "joint_name": joint_name,
             "controller_method": run_meta.get("controller.method") or inferred["controller_method"],
-            "reference_mode": (
+            "policy_interpolation": (
                 run_meta.get("reference.mode")
-                or cfg_reference_mode
-                or (inferred["reference_mode"] if inferred["reference_mode"] != "unspecified" else "")
-                or data_reference_mode
+                or cfg_policy_interpolation
+                or (inferred["policy_interpolation"] if inferred["policy_interpolation"] != "unspecified" else "")
+                or data_policy_interpolation
                 or "unspecified"
             ),
             "interpolation": (
@@ -421,11 +421,11 @@ def build_index(data_root: Path) -> list[dict[str, object]]:
             "trajectory": run_meta.get("reference.trajectory") or inferred["trajectory"],
             "kp": run_meta.get("controller.kp") or config_meta.get("controller.kp", ""),
             "kd": run_meta.get("controller.kd") or config_meta.get("controller.kd", ""),
-            "ref_center": run_meta.get("reference.center") or config_meta.get("controller.ref_center", ""),
-            "ref_amplitude": run_meta.get("reference.amplitude")
-            or config_meta.get("controller.ref_amplitude", ""),
-            "ref_frequency": run_meta.get("reference.frequency")
-            or config_meta.get("controller.ref_frequency", ""),
+            "policy_center": run_meta.get("reference.center") or config_meta.get("controller.policy_center", ""),
+            "policy_amplitude": run_meta.get("reference.amplitude")
+            or config_meta.get("controller.policy_amplitude", ""),
+            "policy_frequency_hz": run_meta.get("reference.frequency")
+            or config_meta.get("controller.policy_frequency_hz", ""),
             "file_size_bytes": stat.st_size,
             "modified_time": dt.datetime.fromtimestamp(stat.st_mtime).isoformat(sep=" "),
             "notes": run_meta.get("notes", ""),

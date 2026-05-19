@@ -1,4 +1,4 @@
-#include "eid_controller.hpp"
+#include "controller_factory.hpp"
 #include "runtime_config.hpp"
 #include "safety.hpp"
 
@@ -42,6 +42,13 @@ void writeReady(const std::vector<int>& active_joints) {
 
 void writeCommand(const h1if::RobotCommand& command, const h1if::ControllerDebug& debug) {
     std::cout << std::setprecision(17) << "cmd " << debug.flags;
+    // Motor commands (5 x 20 = 100 values)
+    for (int i = 0; i < h1if::kMaxMotors; ++i) {
+        std::cout << ' ' << command.joint[i].q;
+    }
+    for (int i = 0; i < h1if::kMaxMotors; ++i) {
+        std::cout << ' ' << command.joint[i].dq;
+    }
     for (int i = 0; i < h1if::kMaxMotors; ++i) {
         std::cout << ' ' << command.joint[i].tau;
     }
@@ -51,11 +58,26 @@ void writeCommand(const h1if::RobotCommand& command, const h1if::ControllerDebug
     for (int i = 0; i < h1if::kMaxMotors; ++i) {
         std::cout << ' ' << command.joint[i].kd;
     }
+    // Full joint debug data: 32 doubles x 20 joints = 640 values
+    for (int slot = 0; slot < 32; ++slot) {
+        for (int i = 0; i < h1if::kMaxMotors; ++i) {
+            std::cout << ' ' << debug.joint[i].data[slot];
+        }
+    }
+    // Joint safety flags (20 values)
+    for (int i = 0; i < h1if::kMaxMotors; ++i) {
+        std::cout << ' ' << debug.joint[i].flags;
+    }
+    std::cout << '\n' << std::flush;
+}
+
+void writeReference(const h1if::ControllerDebug& debug) {
+    std::cout << std::setprecision(17) << "ref " << debug.flags;
     for (int i = 0; i < h1if::kMaxMotors; ++i) {
         std::cout << ' ' << debug.joint[i].data[0];
     }
     for (int i = 0; i < h1if::kMaxMotors; ++i) {
-        std::cout << ' ' << debug.joint[i].data[8];
+        std::cout << ' ' << debug.joint[i].data[1];
     }
     for (int i = 0; i < h1if::kMaxMotors; ++i) {
         std::cout << ' ' << debug.joint[i].flags;
@@ -73,8 +95,9 @@ int main(int argc, char** argv) {
 
     try {
         h1if::RuntimeConfig cfg = h1if::loadRuntimeConfig(argv[1]);
-        const std::vector<int> active_joints = h1if::activeEidJoints(cfg);
-        h1if::EidMultiJointController controller(cfg);
+        const bool reference_only = argc >= 3 && std::string(argv[2]) == "--reference-only";
+        const std::vector<int> active_joints = h1if::activeControllerJoints(cfg);
+        const auto controller = h1if::createController(cfg);
         bool initialized = false;
 
         writeReady(active_joints);
@@ -92,16 +115,20 @@ int main(int argc, char** argv) {
             h1if::RobotCommand command;
             h1if::ControllerDebug debug;
             if (!initialized) {
-                controller.reset(state);
+                controller->reset(state);
                 initialized = true;
             }
-            controller.step(state, command, debug);
-            h1if::applySafety(state, command, debug, cfg.safety);
-            writeCommand(command, debug);
+            controller->step(state, command, debug);
+            if (reference_only) {
+                writeReference(debug);
+            } else {
+                h1if::applySafety(state, command, debug, cfg.safety);
+                writeCommand(command, debug);
+            }
         }
         return 0;
     } catch (const std::exception& ex) {
-        std::cerr << "h1_eid_stepper failed: " << ex.what() << "\n";
+            std::cerr << "h1_controller_stepper failed: " << ex.what() << "\n";
         return 1;
     }
 }

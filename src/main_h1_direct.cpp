@@ -1,5 +1,5 @@
 #include "async_csv_logger.hpp"
-#include "eid_controller.hpp"
+#include "controller_factory.hpp"
 #include "runtime_config.hpp"
 #include "safety.hpp"
 
@@ -38,9 +38,6 @@ constexpr const char* kTopicLowCmd = "rt/lowcmd";
 constexpr const char* kTopicLowState = "rt/lowstate";
 constexpr float kPosStopF = 2.146E9f;
 constexpr float kVelStopF = 16000.0f;
-constexpr double kMaxMeasuredSpeed = 8.0;
-constexpr double kMaxMeasuredJump = 0.10;
-constexpr double kMaxControlDt = 0.010;
 
 std::atomic<bool> g_running{true};
 
@@ -114,8 +111,8 @@ class UnitreeH1DirectInterface {
 public:
     explicit UnitreeH1DirectInterface(h1if::RuntimeConfig cfg)
         : cfg_(std::move(cfg)),
-          controller_(cfg_),
-          active_joints_(h1if::activeEidJoints(cfg_)) {}
+          controller_(h1if::createController(cfg_)),
+          active_joints_(h1if::activeControllerJoints(cfg_)) {}
 
     void init() {
         initRealtimeMemory();
@@ -140,9 +137,9 @@ public:
             std::cerr << "Warning: cannot open log file: " << cfg_.log_path << "\n";
         }
 
-        std::cout << "Controller: " << controller_.name() << "\n";
+        std::cout << "Controller: " << controller_->name() << "\n";
         waitForFirstState();
-        controller_.reset(readRobotState(0, cfg_.control_dt));
+        controller_->reset(readRobotState(0, cfg_.control_dt));
     }
 
     void run() {
@@ -163,13 +160,13 @@ public:
 
             std::string trip_reason;
             if (checkMeasuredTrip(state, actual_dt, trip_reason)) {
-                std::cerr << "EID stopped: " << trip_reason << "\n";
+                std::cerr << "controller stopped: " << trip_reason << "\n";
                 sendSafeHold();
                 break;
             }
 
             if (state.state_valid) {
-                controller_.step(state, command, debug);
+                controller_->step(state, command, debug);
             } else {
                 h1if::fillSafeHoldCommand(state, command, cfg_.safety);
             }
@@ -314,8 +311,8 @@ private:
             reason = "LowState timeout";
             return true;
         }
-        if (dt <= 0.0 || dt > kMaxControlDt) {
-            reason = "control loop jitter/overrun exceeded trip";
+        if (dt <= 0.0 || dt > cfg_.safety.max_control_dt) {
+            reason = "control loop jitter/overrun exceeded max_control_dt trip";
             return true;
         }
 
@@ -332,12 +329,12 @@ private:
                 reason = prefix + "angle exceeded configured limits";
                 return true;
             }
-            if (std::abs(target.dq) > kMaxMeasuredSpeed) {
-                reason = prefix + "speed exceeded measured-speed trip";
+            if (std::abs(target.dq) > cfg_.safety.measured_speed_trip) {
+                reason = prefix + "speed exceeded measured_speed_trip trip";
                 return true;
             }
-            if (have_last_q_[j] && std::abs(target.q - last_q_[j]) > kMaxMeasuredJump) {
-                reason = prefix + "measured angle jumped too far";
+            if (have_last_q_[j] && std::abs(target.q - last_q_[j]) > cfg_.safety.measured_jump_trip) {
+                reason = prefix + "measured angle jump exceeded measured_jump_trip trip";
                 return true;
             }
 
@@ -384,7 +381,7 @@ private:
     }
 
     h1if::RuntimeConfig cfg_;
-    h1if::EidMultiJointController controller_;
+    std::unique_ptr<h1if::IController> controller_;
     std::vector<int> active_joints_;
     std::array<double, h1if::kMaxMotors> last_q_{};
     std::array<bool, h1if::kMaxMotors> have_last_q_{};

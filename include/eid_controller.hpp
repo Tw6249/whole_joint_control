@@ -16,15 +16,15 @@ namespace h1if {
 
 class EidJointController final {
 public:
-    explicit EidJointController(JointEidConfig cfg)
+    explicit EidJointController(JointControllerConfig cfg)
         : cfg_(std::move(cfg)),
-          reference_(makeReferenceConfig(cfg_.controller, cfg_.plant)) {}
+          reference_(makePolicyReferenceConfig(cfg_.controller, &cfg_.plant)) {}
 
     int jointId() const {
         return cfg_.controller.target_joint;
     }
 
-    const JointEidConfig& config() const {
+    const JointControllerConfig& config() const {
         return cfg_;
     }
 
@@ -40,7 +40,7 @@ public:
         q_start_ = state.joint[j].q;
         dq_start_ = state.joint[j].dq;
         last_tau_ = 0.0;
-        reference_.configure(makeReferenceConfig(cfg_.controller, cfg_.plant));
+        reference_.configure(makePolicyReferenceConfig(cfg_.controller, &cfg_.plant));
         reference_.reset();
         initialized_ = true;
     }
@@ -56,9 +56,9 @@ public:
         const double t = state.t - t0_;
         const double dt = cfg_.controller.control_dt;
 
-        const JointReferencePair raw_ref = reference_.sample(t, dt);
+        const JointReferencePair raw_ref = reference_.sample(t, dt, q, dq);
         const JointReferencePair ramped_ref = shapeStartupReference(raw_ref, t, dt);
-        const JointReferencePair ref = shapeReferenceForMode(ramped_ref, q, dq, dt);
+        const JointReferencePair ref = ramped_ref;
         const StepResult result = controllerStep(q, dq, ref, dt);
 
         auto& c = command.joint[j];
@@ -75,9 +75,8 @@ public:
         jd[1] = ref.now.dq;
         jd[2] = q;
         jd[3] = dq;
-        const bool closed_loop_reference = cfg_.controller.reference_mode == ReferenceMode::ClosedLoop;
-        jd[4] = (closed_loop_reference ? raw_ref.now.q : ref.now.q) - q;
-        jd[5] = (closed_loop_reference ? raw_ref.now.dq : ref.now.dq) - dq;
+        jd[4] = raw_ref.now.q - q;
+        jd[5] = raw_ref.now.dq - dq;
         jd[6] = result.u_star;
         jd[7] = result.u_feedback;
         jd[8] = result.u_t;
@@ -214,7 +213,7 @@ private:
 
     JointReferencePair shapeStartupReference(const JointReferencePair& raw, double t, double dt) const {
         JointReferencePair shaped = raw;
-        const double ramp = cfg_.controller.startup_ramp_duration;
+        const double ramp = cfg_.controller.startup_blend_duration_s;
         if (ramp <= 1.0e-9 || t >= ramp) {
             return shaped;
         }
@@ -239,30 +238,11 @@ private:
         return shaped;
     }
 
-    JointReferencePair shapeReferenceForMode(const JointReferencePair& ramped,
-                                             double q,
-                                             double dq,
-                                             double dt) const {
-        const auto& c = cfg_.controller;
-        if (c.reference_mode == ReferenceMode::OpenLoop) {
-            return ramped;
-        }
-
-        JointReferencePair closed = ramped;
-        const double alpha =
-            clamp(dt / std::max(c.closed_loop_reference_tau, dt), 0.0, 1.0);
-        closed.now.q = q;
-        closed.now.dq = dq;
-        closed.next.q = q + alpha * (ramped.next.q - q);
-        closed.next.dq = dq + alpha * (ramped.next.dq - dq);
-        return closed;
-    }
-
     double limitTorqueCommand(double tau, double dt) {
         const auto& c = cfg_.controller;
-        const double tau_limit = std::min(std::abs(c.eid_tau_limit), cfg_.plant.tau_max);
+        const double tau_limit = std::min(std::abs(c.tau_limit), cfg_.plant.tau_max);
         double limited = clamp(tau, -tau_limit, tau_limit);
-        const double slew = c.eid_tau_slew_rate;
+        const double slew = c.tau_slew_rate;
         if (slew > 0.0) {
             const double max_delta = slew * std::max(dt, 0.0);
             limited = clamp(limited, last_tau_ - max_delta, last_tau_ + max_delta);
@@ -338,49 +318,11 @@ private:
         return model.gravityA * std::sin(q) + model.gravityB * std::cos(q);
     }
 
-    static ReferenceTrajectoryConfig makeReferenceConfig(const EidControllerConfig& cfg,
-                                                         const PlantModelConfig& model) {
-        const double q_min = model.q_min;
-        const double q_max = model.q_max;
-        const double default_center = 0.5 * (q_min + q_max);
-        const double default_amplitude = 0.5 * (q_max - q_min);
-
-        ReferenceTrajectoryConfig ref;
-        ref.signal = cfg.reference_signal;
-        ref.policy_dt = cfg.policy_reference_dt;
-        ref.step_time = cfg.ref_step_time;
-        if (q_max > q_min) {
-            ref.center = std::isfinite(cfg.ref_center)
-                             ? clamp(cfg.ref_center, q_min, q_max)
-                             : default_center;
-
-            const double requested_amplitude =
-                std::isfinite(cfg.ref_amplitude) ? cfg.ref_amplitude : default_amplitude;
-            const double max_positive_amplitude = q_max - ref.center;
-            const double max_negative_amplitude = q_min - ref.center;
-            if (cfg.reference_signal == ReferenceSignal::Step) {
-                ref.amplitude = clamp(requested_amplitude, max_negative_amplitude, max_positive_amplitude);
-            } else {
-                const double max_amplitude = std::min(ref.center - q_min, q_max - ref.center);
-                ref.amplitude = clamp(std::abs(requested_amplitude), 0.0, max_amplitude);
-            }
-        } else {
-            ref.center = clamp(cfg.ref_center, model.q_min, model.q_max);
-            ref.amplitude = 0.0;
-        }
-
-        ref.frequency = std::isfinite(cfg.ref_frequency) && cfg.ref_frequency > 0.0
-                            ? cfg.ref_frequency
-                            : 0.05;
-        ref.phase = std::isfinite(cfg.ref_phase) ? cfg.ref_phase : -1.57079632679489661923;
-        return ref;
-    }
-
     static double clamp(double x, double lo, double hi) {
         return std::max(lo, std::min(x, hi));
     }
 
-    JointEidConfig cfg_;
+    JointControllerConfig cfg_;
     bool initialized_ = false;
     double t0_ = 0.0;
     double eta_q_ = 0.0;
@@ -392,15 +334,15 @@ private:
     double q_start_ = 0.0;
     double dq_start_ = 0.0;
     double last_tau_ = 0.0;
-    SmoothSineReferenceTrajectory reference_;
+    PolicyReferenceInterpolator reference_;
 };
 
 class EidMultiJointController final : public IController {
 public:
     explicit EidMultiJointController(RuntimeConfig cfg)
         : safety_(cfg.safety) {
-        for (int joint_id : activeEidJoints(cfg)) {
-            controllers_.emplace_back(*cfg.eid_controllers[joint_id]);
+        for (int joint_id : activeControllerJoints(cfg)) {
+            controllers_.emplace_back(*cfg.controller.joints[joint_id]);
         }
     }
 
