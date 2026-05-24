@@ -116,11 +116,20 @@ def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(x, hi))
 
 
+def parse_int_list(value: str) -> list[int]:
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return [int(item.strip()) for item in value.split(",") if item.strip()]
+
+
 def load_controller_references(config: Path) -> dict[int, JointReference]:
     section: str | None = None
     controller_scope: str | None = None
     current_joint: int | None = None
+    current_group: dict[str, object] | None = None
     defaults: dict[str, str] = {}
+    groups: list[dict[str, object]] = []
     values: dict[int, dict[str, str]] = {}
 
     for raw_line in config.read_text(encoding="utf-8").splitlines():
@@ -131,6 +140,7 @@ def load_controller_references(config: Path) -> dict[int, JointReference]:
             section = stripped.rstrip(":") if stripped.endswith(":") else None
             controller_scope = None
             current_joint = None
+            current_group = None
             continue
 
         if section != "controller":
@@ -138,15 +148,35 @@ def load_controller_references(config: Path) -> dict[int, JointReference]:
         indent = len(raw_line) - len(raw_line.lstrip(" "))
         match = KEY_VALUE_RE.match(raw_line)
         if indent == 2 and match:
-            if match.group(1) in {"defaults", "joints"}:
+            if match.group(1) in {"defaults", "groups", "joints"}:
                 controller_scope = match.group(1)
                 current_joint = None
+                current_group = None
             continue
         if controller_scope == "defaults" and indent == 4 and match and match.group(1) in {
             "policy_source", "policy_center", "policy_amplitude",
             "policy_phase_rad", "policy_step_time_s",
         }:
             defaults[match.group(1)] = match.group(2).strip()
+            continue
+        if controller_scope == "groups" and indent == 4:
+            header = re.match(r"^\s+([A-Za-z0-9_]+):\s*(?:#.*)?$", raw_line)
+            if header:
+                current_group = {"joints": [], "values": {}}
+                groups.append(current_group)
+            continue
+        if controller_scope == "groups" and current_group is not None and indent == 6 and match:
+            key = match.group(1)
+            raw_value = match.group(2).strip()
+            if key == "joints":
+                current_group["joints"] = parse_int_list(raw_value)
+            elif key in {
+                "policy_source", "policy_center", "policy_amplitude",
+                "policy_phase_rad", "policy_step_time_s",
+            }:
+                current_group_values = current_group["values"]
+                assert isinstance(current_group_values, dict)
+                current_group_values[key] = raw_value
             continue
         if controller_scope == "joints" and indent == 4:
             header = JOINT_HEADER_RE.match(raw_line)
@@ -164,7 +194,14 @@ def load_controller_references(config: Path) -> dict[int, JointReference]:
 
     refs: dict[int, JointReference] = {}
     for joint_id in sorted(values):
-        item = {**defaults, **values[joint_id]}
+        item = dict(defaults)
+        for group in groups:
+            group_joints = group.get("joints", [])
+            if joint_id in group_joints:
+                group_values = group.get("values", {})
+                if isinstance(group_values, dict):
+                    item.update(group_values)
+        item.update(values[joint_id])
         required = {"policy_center", "policy_amplitude"}
         missing = sorted(required - set(item))
         if missing:

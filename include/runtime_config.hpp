@@ -40,6 +40,13 @@ struct ControllerParams {
     double policy_frequency_hz = 0.05;
     double policy_phase_rad = -1.5707963267948966;
     double policy_step_time_s = 1.0;
+    double policy_max_velocity = 0.0;
+    double policy_max_acceleration = 0.0;
+    double policy_max_jerk = 0.0;
+    double policy_rl_velocity_alpha = 0.35;
+    double policy_rl_acceleration_alpha = 0.25;
+    double policy_rl_target_acceleration_blend = 0.5;
+    RuckigTargetVelocity policy_ruckig_target_velocity = RuckigTargetVelocity::Policy;
     double startup_blend_duration_s = 4.0;
     double tau_limit = 0.0;
     double tau_slew_rate = 0.0;
@@ -132,6 +139,24 @@ inline int toInt(const std::string& value) {
     return std::stoi(value, nullptr, 0);
 }
 
+inline std::vector<int> parseIntList(std::string value) {
+    value = trim(value);
+    if (value.size() >= 2 && value.front() == '[' && value.back() == ']') {
+        value = value.substr(1, value.size() - 2);
+    }
+
+    std::vector<int> result;
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item = trim(item);
+        if (!item.empty()) {
+            result.push_back(toInt(item));
+        }
+    }
+    return result;
+}
+
 inline bool toBool(const std::string& value) {
     std::string token = trim(value);
     for (char& ch : token) {
@@ -188,7 +213,13 @@ inline PolicyInterpolation parsePolicyInterpolation(const std::string& value) {
     if (token == "closed_loop" || token == "closedloop" || token == "closed") {
         return PolicyInterpolation::ClosedLoop;
     }
-    throw std::runtime_error("policy_interpolation must be open_loop or closed_loop");
+    if (token == "ruckig") {
+        return PolicyInterpolation::Ruckig;
+    }
+    if (token == "rl_smoothed" || token == "rlsmooth" || token == "rl_smooth") {
+        return PolicyInterpolation::RlSmoothed;
+    }
+    throw std::runtime_error("policy_interpolation must be open_loop, closed_loop, ruckig, or rl_smoothed");
 }
 
 inline PolicySource parsePolicySource(const std::string& value) {
@@ -203,6 +234,17 @@ inline PolicySource parsePolicySource(const std::string& value) {
         return PolicySource::Step;
     }
     throw std::runtime_error("policy_source must be hold, sine, or step");
+}
+
+inline RuckigTargetVelocity parseRuckigTargetVelocity(const std::string& value) {
+    const std::string token = normalizeToken(trim(value));
+    if (token == "policy" || token == "policy_velocity") {
+        return RuckigTargetVelocity::Policy;
+    }
+    if (token == "zero" || token == "stop") {
+        return RuckigTargetVelocity::Zero;
+    }
+    throw std::runtime_error("policy_ruckig_target_velocity must be policy or zero");
 }
 
 inline void parseControllerParamField(ControllerParams& cfg,
@@ -246,6 +288,12 @@ inline void parseControllerParamField(ControllerParams& cfg,
     else if (key == "policy_frequency_hz") cfg.policy_frequency_hz = toDouble(value);
     else if (key == "policy_phase_rad") cfg.policy_phase_rad = toDouble(value);
     else if (key == "policy_step_time_s") cfg.policy_step_time_s = toDouble(value);
+    else if (key == "policy_max_acceleration") cfg.policy_max_acceleration = toDouble(value);
+    else if (key == "policy_max_jerk") cfg.policy_max_jerk = toDouble(value);
+    else if (key == "policy_rl_velocity_alpha") cfg.policy_rl_velocity_alpha = toDouble(value);
+    else if (key == "policy_rl_acceleration_alpha") cfg.policy_rl_acceleration_alpha = toDouble(value);
+    else if (key == "policy_rl_target_acceleration_blend") cfg.policy_rl_target_acceleration_blend = toDouble(value);
+    else if (key == "policy_ruckig_target_velocity") cfg.policy_ruckig_target_velocity = parseRuckigTargetVelocity(value);
     else if (key == "startup_blend_duration_s") cfg.startup_blend_duration_s = toDouble(value);
     else if (key == "tau_limit") cfg.tau_limit = toDouble(value);
     else if (key == "tau_slew_rate") cfg.tau_slew_rate = toDouble(value);
@@ -296,6 +344,13 @@ inline PolicyReferenceConfig makePolicyReferenceConfig(const ControllerParams& c
     ref.source = cfg.policy_source;
     ref.policy_dt = cfg.policy_dt;
     ref.step_time_s = cfg.policy_step_time_s;
+    ref.max_velocity = cfg.policy_max_velocity;
+    ref.max_acceleration = cfg.policy_max_acceleration;
+    ref.max_jerk = cfg.policy_max_jerk;
+    ref.rl_velocity_alpha = cfg.policy_rl_velocity_alpha;
+    ref.rl_acceleration_alpha = cfg.policy_rl_acceleration_alpha;
+    ref.rl_target_acceleration_blend = cfg.policy_rl_target_acceleration_blend;
+    ref.ruckig_target_velocity = cfg.policy_ruckig_target_velocity;
 
     if (model != nullptr && model->q_max > model->q_min) {
         const double q_min = model->q_min;
@@ -425,6 +480,37 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
             throw std::runtime_error(prefix + ".target_joint must match its map key");
         }
 
+        const auto& lim = cfg.safety.limit[joint_id];
+        if (jc.controller.policy_interpolation == PolicyInterpolation::Ruckig ||
+            jc.controller.policy_interpolation == PolicyInterpolation::RlSmoothed) {
+            if (lim.dq_max <= 0.0f || !finite(lim.dq_max)) {
+                throw std::runtime_error(prefix + ".joint_limits.dq_max must be > 0 for constrained policy interpolation");
+            }
+        }
+        if (jc.controller.policy_interpolation == PolicyInterpolation::Ruckig) {
+            if (jc.controller.policy_max_acceleration <= 0.0 ||
+                jc.controller.policy_max_jerk <= 0.0 ||
+                !finite(jc.controller.policy_max_acceleration) ||
+                !finite(jc.controller.policy_max_jerk)) {
+                throw std::runtime_error(prefix + " policy_max_acceleration and policy_max_jerk must be > 0 for policy_interpolation=ruckig");
+            }
+        }
+        if (jc.controller.policy_interpolation == PolicyInterpolation::RlSmoothed) {
+            if (jc.controller.policy_max_acceleration <= 0.0 ||
+                !finite(jc.controller.policy_max_acceleration) ||
+                jc.controller.policy_rl_velocity_alpha < 0.0 ||
+                jc.controller.policy_rl_velocity_alpha > 1.0 ||
+                jc.controller.policy_rl_acceleration_alpha < 0.0 ||
+                jc.controller.policy_rl_acceleration_alpha > 1.0 ||
+                jc.controller.policy_rl_target_acceleration_blend < 0.0 ||
+                jc.controller.policy_rl_target_acceleration_blend > 1.0 ||
+                !finite(jc.controller.policy_rl_velocity_alpha) ||
+                !finite(jc.controller.policy_rl_acceleration_alpha) ||
+                !finite(jc.controller.policy_rl_target_acceleration_blend)) {
+                throw std::runtime_error(prefix + " rl_smoothed interpolation requires positive policy_max_acceleration and alpha/blend values in [0, 1]");
+            }
+        }
+
         if (cfg.controller.kind == ControllerKind::Eid) {
             if (!jc.has_plant) {
                 throw std::runtime_error(prefix + ".plant is required for controller.kind=eid");
@@ -432,7 +518,6 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
             validateEidControllerConfig(jc.controller, prefix);
             validatePlantConfig(jc.plant, prefix + ".plant");
 
-            const auto& lim = cfg.safety.limit[joint_id];
             if (std::abs(jc.controller.tau_limit) > static_cast<double>(lim.tau_max) + 1.0e-6) {
                 throw std::runtime_error(prefix + ".tau_limit exceeds joint_limits tau_max");
             }
@@ -469,11 +554,25 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
         throw std::runtime_error("Cannot open config file: " + path);
     }
 
+    struct ParamAssignment {
+        std::string key;
+        std::string value;
+    };
+
+    struct ControllerGroup {
+        std::string name;
+        std::vector<int> joints;
+        std::vector<ParamAssignment> params;
+    };
+
     std::string section;
     std::string controller_scope;
     int current_limit_joint = -1;
     int current_controller_joint = -1;
+    int current_controller_group = -1;
     bool current_joint_plant = false;
+    std::vector<ControllerGroup> controller_groups;
+    std::array<std::vector<ParamAssignment>, kMaxMotors> joint_param_overrides{};
     std::string line;
 
     while (std::getline(in, line)) {
@@ -500,6 +599,7 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             controller_scope.clear();
             current_limit_joint = -1;
             current_controller_joint = -1;
+            current_controller_group = -1;
             current_joint_plant = false;
             continue;
         }
@@ -529,11 +629,14 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
         } else if (section == "controller") {
             if (indent == 2) {
                 current_controller_joint = -1;
+                current_controller_group = -1;
                 current_joint_plant = false;
                 if (key == "kind") {
                     cfg.controller.kind = parseControllerKind(value);
                 } else if (key == "defaults" && value.empty()) {
                     controller_scope = "defaults";
+                } else if (key == "groups" && value.empty()) {
+                    controller_scope = "groups";
                 } else if (key == "joints" && value.empty()) {
                     controller_scope = "joints";
                 }
@@ -542,6 +645,23 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
 
             if (indent == 4 && controller_scope == "defaults") {
                 parseControllerParamField(cfg.controller.defaults, key, value);
+            } else if (indent == 4 && controller_scope == "groups" && value.empty()) {
+                ControllerGroup group;
+                group.name = key;
+                controller_groups.push_back(group);
+                current_controller_group = static_cast<int>(controller_groups.size()) - 1;
+            } else if (indent == 6 && controller_scope == "groups" && current_controller_group >= 0) {
+                auto& group = controller_groups[static_cast<std::size_t>(current_controller_group)];
+                if (key == "joints") {
+                    group.joints = parseIntList(value);
+                    for (int joint_id : group.joints) {
+                        if (joint_id < 0 || joint_id >= kMaxMotors) {
+                            throw std::runtime_error("controller.groups." + group.name + ".joints contains out-of-range joint id");
+                        }
+                    }
+                } else {
+                    group.params.push_back({key, value});
+                }
             } else if (indent == 4 && controller_scope == "joints" && value.empty()) {
                 current_controller_joint = toInt(key);
                 if (current_controller_joint < 0 || current_controller_joint >= kMaxMotors) {
@@ -568,6 +688,7 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
                 } else if (key == "enabled") {
                     joint_cfg.enabled = toBool(value);
                 } else {
+                    joint_param_overrides[static_cast<std::size_t>(current_controller_joint)].push_back({key, value});
                     parseControllerParamField(joint_cfg.controller, key, value);
                 }
             } else if (indent == 8 && controller_scope == "joints" && current_joint_plant &&
@@ -591,8 +712,22 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
     cfg.controller.defaults.control_dt = cfg.control_dt;
     for (int i = 0; i < kMaxMotors; ++i) {
         if (cfg.controller.joints[i].has_value()) {
-            cfg.controller.joints[i]->controller.control_dt = cfg.control_dt;
-            cfg.controller.joints[i]->controller.target_joint = i;
+            ControllerParams merged = cfg.controller.defaults;
+            for (const auto& group : controller_groups) {
+                if (std::find(group.joints.begin(), group.joints.end(), i) == group.joints.end()) {
+                    continue;
+                }
+                for (const auto& param : group.params) {
+                    parseControllerParamField(merged, param.key, param.value);
+                }
+            }
+            for (const auto& param : joint_param_overrides[static_cast<std::size_t>(i)]) {
+                parseControllerParamField(merged, param.key, param.value);
+            }
+            merged.control_dt = cfg.control_dt;
+            merged.target_joint = i;
+            merged.policy_max_velocity = static_cast<double>(cfg.safety.limit[i].dq_max);
+            cfg.controller.joints[i]->controller = merged;
         }
     }
     validateRuntimeConfig(cfg);

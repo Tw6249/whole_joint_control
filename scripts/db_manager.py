@@ -149,6 +149,31 @@ TABLE_DEFS = [
         created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(eid_experiment_id, pd_experiment_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS timeseries_files (
+        file_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        experiment_id     INTEGER NOT NULL REFERENCES experiments(experiment_id),
+        path              TEXT NOT NULL,
+        format            TEXT NOT NULL DEFAULT 'parquet',
+        rows              INTEGER,
+        sample_rate_hz    REAL,
+        schema_version    TEXT NOT NULL DEFAULT '1',
+        created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(experiment_id, path)
+    )""",
+    """CREATE TABLE IF NOT EXISTS control_metrics (
+        metric_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        experiment_id     INTEGER NOT NULL REFERENCES experiments(experiment_id),
+        joint_id          INTEGER NOT NULL,
+        metric_name       TEXT NOT NULL,
+        value             REAL,
+        unit              TEXT,
+        window_start_s    REAL,
+        window_end_s      REAL,
+        source            TEXT,
+        algorithm_version TEXT NOT NULL DEFAULT 'control_metrics_v1',
+        created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(experiment_id, joint_id, metric_name, window_start_s, window_end_s, algorithm_version)
+    )""",
 ]
 
 # Flexible summary CSV column mapping: CSV column name -> DB column name
@@ -220,13 +245,13 @@ def parse_yaml_config(config_path: Path) -> dict[str, Any]:
 
     Returns a dict with keys like:
       'robot', 'control_dt', 'controller', 'safe_hold',
-      'controller': {'kind': str, 'defaults': {}, 'joints': {joint_id: {...}}},
+      'controller': {'kind': str, 'defaults': {}, 'groups': [], 'joints': {joint_id: {...}}},
       'joint_limits': {joint_id: {field: value}}
     """
     text = config_path.read_text(encoding="utf-8")
 
     result: dict[str, Any] = {
-        "controller": {"kind": "eid", "defaults": {}, "joints": {}},
+        "controller": {"kind": "eid", "defaults": {}, "groups": [], "joints": {}},
         "safe_hold": {},
         "joint_limits": {},
     }
@@ -234,6 +259,7 @@ def parse_yaml_config(config_path: Path) -> dict[str, Any]:
     section: str | None = None
     controller_scope: str | None = None
     current_controller_joint: int | None = None
+    current_controller_group: dict[str, Any] | None = None
     current_limit_joint: int | None = None
     in_plant: bool = False
 
@@ -249,6 +275,7 @@ def parse_yaml_config(config_path: Path) -> dict[str, Any]:
             section = stripped.rstrip(":")
             controller_scope = None
             current_controller_joint = None
+            current_controller_group = None
             current_limit_joint = None
             in_plant = False
             continue
@@ -260,6 +287,11 @@ def parse_yaml_config(config_path: Path) -> dict[str, Any]:
             if current_controller_joint not in result["controller"]["joints"]:
                 result["controller"]["joints"][current_controller_joint] = {}
             in_plant = False
+            continue
+        group_match = re.match(r"^\s{4}([A-Za-z0-9_]+):\s*(?:#.*)?$", raw_line)
+        if group_match and section == "controller" and controller_scope == "groups":
+            current_controller_group = {"name": group_match.group(1), "joints": []}
+            result["controller"]["groups"].append(current_controller_group)
             continue
         if num_match and indent == 2 and section == "joint_limits":
             current_limit_joint = int(num_match.group(1))
@@ -285,12 +317,18 @@ def parse_yaml_config(config_path: Path) -> dict[str, Any]:
         elif section == "controller":
             if indent == 2 and key == "kind":
                 result["controller"]["kind"] = value
-            elif indent == 2 and key in ("defaults", "joints") and not value:
+            elif indent == 2 and key in ("defaults", "groups", "joints") and not value:
                 controller_scope = key
                 current_controller_joint = None
+                current_controller_group = None
                 in_plant = False
             elif indent == 4 and controller_scope == "defaults":
                 result["controller"]["defaults"][key] = _coerce_value(value)
+            elif indent == 6 and controller_scope == "groups" and current_controller_group is not None:
+                if key == "joints":
+                    current_controller_group["joints"] = _parse_int_list(value)
+                else:
+                    current_controller_group[key] = _coerce_value(value)
             elif indent == 6 and controller_scope == "joints" and current_controller_joint is not None:
                 if key == "plant" and not value:
                     in_plant = True
@@ -305,6 +343,13 @@ def parse_yaml_config(config_path: Path) -> dict[str, Any]:
             result["joint_limits"][current_limit_joint][key] = _coerce_value(value)
 
     return result
+
+
+def _parse_int_list(value: str) -> list[int]:
+    v = value.strip()
+    if v.startswith("[") and v.endswith("]"):
+        v = v[1:-1]
+    return [int(item.strip()) for item in v.split(",") if item.strip()]
 
 
 def _coerce_value(value: str) -> Any:
@@ -425,6 +470,35 @@ class ExperimentDB:
                     UNIQUE(eid_experiment_id, pd_experiment_id)
                 )"""
             )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS timeseries_files (
+                    file_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id     INTEGER NOT NULL REFERENCES experiments(experiment_id),
+                    path              TEXT NOT NULL,
+                    format            TEXT NOT NULL DEFAULT 'parquet',
+                    rows              INTEGER,
+                    sample_rate_hz    REAL,
+                    schema_version    TEXT NOT NULL DEFAULT '1',
+                    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(experiment_id, path)
+                )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS control_metrics (
+                    metric_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id     INTEGER NOT NULL REFERENCES experiments(experiment_id),
+                    joint_id          INTEGER NOT NULL,
+                    metric_name       TEXT NOT NULL,
+                    value             REAL,
+                    unit              TEXT,
+                    window_start_s    REAL,
+                    window_end_s      REAL,
+                    source            TEXT,
+                    algorithm_version TEXT NOT NULL DEFAULT 'control_metrics_v1',
+                    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(experiment_id, joint_id, metric_name, window_start_s, window_end_s, algorithm_version)
+                )"""
+            )
             # Add disturb columns to experiments if missing
             cur = conn.execute("PRAGMA table_info(experiments)")
             cols = {row[1] for row in cur.fetchall()}
@@ -466,9 +540,6 @@ class ExperimentDB:
         ts = extract_timestamp(run_id)
         inferred = extract_metadata_from_dirname(run_id)
 
-        if ts is None:
-            ts = datetime.fromtimestamp(run_dir.stat().st_mtime)
-
         # Determine controller method from config if available
         controller_method = str(inferred.get("controller_method", "EID"))
         # If this is from compare_eid_pd_mujoco, it's EID_vs_PD
@@ -479,6 +550,9 @@ class ExperimentDB:
 
         control_dt = float(cfg.get("control_dt", 0.002))
         duration_s = self._estimate_duration(run_dir, summary_files)
+
+        if ts is None:
+            ts = self._estimate_run_timestamp(run_dir, config_path, summary_files)
 
         conn = self._connect()
         try:
@@ -522,6 +596,8 @@ class ExperimentDB:
             if "controller_summary" in summary_files:
                 self._import_summary_csv(conn, exp_id, summary_files["controller_summary"])
 
+            self._import_timeseries_artifacts(conn, exp_id, run_dir)
+
             conn.commit()
             return exp_id
         except Exception:
@@ -535,6 +611,7 @@ class ExperimentDB:
         """Extract per-joint controller configs from parsed YAML and insert."""
         controller_cfg = cfg.get("controller", {})
         controller_defaults = controller_cfg.get("defaults", {})
+        controller_groups = controller_cfg.get("groups", [])
         controller_joints = controller_cfg.get("joints", {})
         joint_limits = cfg.get("joint_limits", {})
 
@@ -546,6 +623,15 @@ class ExperimentDB:
             jid = int(joint_id)
             jlim = joint_limits.get(joint_id, {})
             plant = jc.get("plant", {})
+            effective_jc = dict(controller_defaults)
+            for group in controller_groups:
+                group_joints = group.get("joints", [])
+                if jid in group_joints:
+                    effective_jc.update({
+                        key: value for key, value in group.items()
+                        if key not in ("name", "joints")
+                    })
+            effective_jc.update(jc)
 
             enabled = jc.get("enabled", True)
             if isinstance(enabled, str):
@@ -555,7 +641,7 @@ class ExperimentDB:
             name = jc.get("name", JOINT_NAMES.get(jid, f"Joint{jid}"))
 
             def _get(d: dict, key: str, default: Any = None) -> Any:
-                return d.get(key, controller_defaults.get(key, default))
+                return d.get(key, effective_jc.get(key, default))
 
             conn.execute(
                 """INSERT OR REPLACE INTO joint_configs
@@ -750,6 +836,322 @@ class ExperimentDB:
         print(f"  Legacy split: {run_id} -> EID={eid_exp_id}, PD={pd_exp_id}")
         return eid_exp_id, pd_exp_id
 
+    # ---- Timeseries artifacts and control metrics ----
+
+    def _import_timeseries_artifacts(self, conn: sqlite3.Connection, exp_id: int,
+                                     run_dir: Path) -> None:
+        """Convert available timeseries CSV to Parquet and compute control metrics."""
+        csv_path = self._find_timeseries_csv(run_dir)
+        if csv_path is None:
+            return
+
+        parquet_path = run_dir / "timeseries.parquet"
+        try:
+            csv_to_parquet(csv_path, parquet_path)
+        except Exception as exc:
+            print(f"  WARNING: Parquet conversion failed for {csv_path}: {exc}")
+            return
+
+        try:
+            import pandas as pd
+        except ImportError:
+            print("  WARNING: pandas not available, skipping control metrics")
+            return
+
+        try:
+            df = pd.read_parquet(parquet_path)
+        except Exception as exc:
+            print(f"  WARNING: could not read {parquet_path}: {exc}")
+            return
+
+        rows = int(len(df))
+        sample_rate_hz = self._estimate_sample_rate(df)
+        duration_s = self._estimate_timeseries_duration(df)
+        conn.execute(
+            """INSERT OR REPLACE INTO timeseries_files
+               (experiment_id, path, format, rows, sample_rate_hz, schema_version)
+               VALUES (?, ?, 'parquet', ?, ?, '1')""",
+            (exp_id, self._relpath(parquet_path), rows, sample_rate_hz),
+        )
+        if duration_s is not None:
+            conn.execute(
+                "UPDATE experiments SET duration_s=COALESCE(duration_s, ?) WHERE experiment_id=?",
+                (duration_s, exp_id),
+            )
+        self._compute_control_metrics(conn, exp_id, df)
+
+    def _find_timeseries_csv(self, run_dir: Path) -> Path | None:
+        return self._find_file(run_dir, [
+            "mujoco_closed_loop_log.csv",
+            "eid_mujoco_closed_loop_log.csv",
+            "pd_mujoco_closed_loop_log.csv",
+            "eid_vs_pd_timeseries.csv",
+        ])
+
+    def _estimate_sample_rate(self, df: Any) -> float | None:
+        if "t" not in df.columns or "joint_id" not in df.columns or df.empty:
+            return None
+        try:
+            first_joint = df["joint_id"].dropna().iloc[0]
+            t = df.loc[df["joint_id"] == first_joint, "t"].astype(float).sort_values()
+            dt = t.diff().dropna()
+            dt = dt[dt > 0]
+            if dt.empty:
+                return None
+            return float(1.0 / dt.median())
+        except Exception:
+            return None
+
+    def _estimate_timeseries_duration(self, df: Any) -> float | None:
+        if "t" not in df.columns or df.empty:
+            return None
+        try:
+            t = df["t"].astype(float)
+            t = t[t.notna()]
+            if t.empty:
+                return None
+            duration = float(t.max() - t.min())
+            return duration if math.isfinite(duration) else None
+        except Exception:
+            return None
+
+    def _compute_control_metrics(self, conn: sqlite3.Connection, exp_id: int, df: Any) -> None:
+        try:
+            import numpy as np
+            import pandas as pd
+        except ImportError:
+            return
+
+        if "joint_id" not in df.columns or "t" not in df.columns:
+            return
+
+        configs = self._load_metric_joint_configs(conn, exp_id)
+        conn.execute("DELETE FROM control_metrics WHERE experiment_id=?", (exp_id,))
+
+        work = df.copy()
+        work["t"] = pd.to_numeric(work["t"], errors="coerce")
+        work["joint_id"] = pd.to_numeric(work["joint_id"], errors="coerce")
+        work = work.dropna(subset=["t", "joint_id"])
+        if work.empty:
+            return
+        work["joint_id"] = work["joint_id"].astype(int)
+
+        def insert_metric(joint_id: int, name: str, value: float | int | None,
+                          unit: str, start: float | None, end: float | None,
+                          source: str = "timeseries") -> None:
+            if value is None:
+                return
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                return
+            if not math.isfinite(v):
+                return
+            conn.execute(
+                """INSERT OR REPLACE INTO control_metrics
+                   (experiment_id, joint_id, metric_name, value, unit,
+                    window_start_s, window_end_s, source, algorithm_version)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'control_metrics_v1')""",
+                (exp_id, joint_id, name, v, unit, start, end, source),
+            )
+
+        for joint_id, g in work.groupby("joint_id", sort=True):
+            g = g.sort_values("t")
+            t = pd.to_numeric(g["t"], errors="coerce").to_numpy(dtype=float)
+            finite_t = t[np.isfinite(t)]
+            if finite_t.size == 0:
+                continue
+            start = float(np.nanmin(finite_t))
+            end = float(np.nanmax(finite_t))
+
+            q_actual_col = self._first_existing(g, ["q_actual", "q", "motor_q"])
+            q_ref_col = self._first_existing(g, ["q_ref_shaped", "q_ref", "q_cmd"])
+            q_error_col = self._first_existing(g, ["q_error_shaped", "q_error_raw", "q_error_raw2"])
+            tau_col = self._first_existing(g, ["u_t", "tau_cmd", "motor_tau"])
+
+            q_error = None
+            if q_error_col is not None:
+                q_error = pd.to_numeric(g[q_error_col], errors="coerce").to_numpy(dtype=float)
+            elif q_actual_col is not None and q_ref_col is not None:
+                q = pd.to_numeric(g[q_actual_col], errors="coerce").to_numpy(dtype=float)
+                q_ref = pd.to_numeric(g[q_ref_col], errors="coerce").to_numpy(dtype=float)
+                q_error = q_ref - q
+
+            if q_error is not None:
+                mask = np.isfinite(q_error) & np.isfinite(t)
+                e = q_error[mask]
+                tt = t[mask]
+                if e.size:
+                    insert_metric(joint_id, "q_rmse", float(np.sqrt(np.mean(e * e))), "rad", start, end)
+                    insert_metric(joint_id, "q_mae", float(np.mean(np.abs(e))), "rad", start, end)
+                    insert_metric(joint_id, "q_max_abs_error", float(np.max(np.abs(e))), "rad", start, end)
+                    insert_metric(joint_id, "q_iae", self._trapz_abs(e, tt), "rad*s", start, end)
+
+            if tau_col is not None:
+                tau = pd.to_numeric(g[tau_col], errors="coerce").to_numpy(dtype=float)
+                mask = np.isfinite(tau) & np.isfinite(t)
+                u = tau[mask]
+                tt = t[mask]
+                if u.size:
+                    insert_metric(joint_id, "tau_mean_abs", float(np.mean(np.abs(u))), "N*m", start, end)
+                    insert_metric(joint_id, "tau_rms", float(np.sqrt(np.mean(u * u))), "N*m", start, end)
+                    insert_metric(joint_id, "tau_abs_max", float(np.max(np.abs(u))), "N*m", start, end)
+                    insert_metric(joint_id, "tau_energy", self._trapz_square(u, tt), "N*m^2*s", start, end)
+                    tau_limit = configs.get(joint_id, {}).get("tau_limit")
+                    if tau_limit is not None and tau_limit > 0:
+                        duty = float(np.mean(np.abs(u) >= 0.98 * tau_limit))
+                        insert_metric(joint_id, "tau_saturation_duty", duty, "ratio", start, end)
+
+            flag_col = self._first_existing(g, ["joint_flags", "flags"])
+            if flag_col is not None:
+                flags = pd.to_numeric(g[flag_col], errors="coerce").fillna(0).to_numpy(dtype=float)
+                insert_metric(joint_id, "joint_flag_any", 1.0 if np.any(flags != 0) else 0.0,
+                              "bool", start, end)
+
+            self._compute_sine_metrics(conn, exp_id, joint_id, g, configs.get(joint_id, {}), insert_metric)
+
+    def _compute_sine_metrics(self, conn: sqlite3.Connection, exp_id: int, joint_id: int,
+                              g: Any, cfg: dict[str, Any], insert_metric: Any) -> None:
+        try:
+            import numpy as np
+            import pandas as pd
+        except ImportError:
+            return
+
+        source = str(cfg.get("policy_source") or "").lower()
+        amp_cfg = cfg.get("policy_amplitude")
+        freq = cfg.get("policy_frequency_hz")
+        if source != "sine" or amp_cfg is None or freq is None:
+            return
+        if abs(float(amp_cfg)) <= 1.0e-6 or float(freq) <= 0:
+            return
+
+        q_actual_col = self._first_existing(g, ["q_actual", "q", "motor_q"])
+        q_ref_col = self._first_existing(g, ["q_ref_shaped", "q_ref", "q_cmd"])
+        if q_actual_col is None:
+            return
+
+        t = pd.to_numeric(g["t"], errors="coerce").to_numpy(dtype=float)
+        q_actual = pd.to_numeric(g[q_actual_col], errors="coerce").to_numpy(dtype=float)
+        start_all = float(np.nanmin(t))
+        end_all = float(np.nanmax(t))
+        duration = max(0.0, end_all - start_all)
+        startup = float(cfg.get("startup_blend_duration_s") or 0.0)
+        window_start = start_all + max(1.0 / float(freq), startup, 0.1 * duration)
+        mask = np.isfinite(t) & np.isfinite(q_actual) & (t >= window_start)
+        if np.count_nonzero(mask) < 6:
+            window_start = start_all + max(startup, 0.1 * duration)
+            mask = np.isfinite(t) & np.isfinite(q_actual) & (t >= window_start)
+            if np.count_nonzero(mask) < 6:
+                return
+
+        actual_fit = self._fit_sine(t[mask], q_actual[mask], float(freq))
+        if actual_fit is None:
+            return
+
+        if q_ref_col is not None:
+            q_ref = pd.to_numeric(g[q_ref_col], errors="coerce").to_numpy(dtype=float)
+            ref_mask = mask & np.isfinite(q_ref)
+            ref_fit = self._fit_sine(t[ref_mask], q_ref[ref_mask], float(freq)) if np.count_nonzero(ref_mask) >= 6 else None
+        else:
+            ref_fit = None
+
+        if ref_fit is None:
+            ref_fit = {
+                "bias": float(cfg.get("policy_center") or 0.0),
+                "amplitude": abs(float(amp_cfg)),
+                "phase": float(cfg.get("policy_phase_rad") or 0.0),
+            }
+
+        ref_amp = float(ref_fit["amplitude"])
+        if ref_amp <= 1.0e-9:
+            return
+        phase_lag = self._wrap_pi(float(ref_fit["phase"]) - float(actual_fit["phase"]))
+        insert_metric(joint_id, "tracking_gain", float(actual_fit["amplitude"]) / ref_amp,
+                      "ratio", window_start, end_all, "sine_fit")
+        insert_metric(joint_id, "phase_lag_rad", phase_lag, "rad", window_start, end_all, "sine_fit")
+        insert_metric(joint_id, "phase_lag_deg", math.degrees(phase_lag),
+                      "deg", window_start, end_all, "sine_fit")
+        insert_metric(joint_id, "amplitude_error", float(actual_fit["amplitude"]) - ref_amp,
+                      "rad", window_start, end_all, "sine_fit")
+        insert_metric(joint_id, "bias_error", float(actual_fit["bias"]) - float(ref_fit["bias"]),
+                      "rad", window_start, end_all, "sine_fit")
+
+    def _load_metric_joint_configs(self, conn: sqlite3.Connection, exp_id: int) -> dict[int, dict[str, Any]]:
+        rows = conn.execute(
+            """SELECT joint_id, policy_source, policy_amplitude, policy_frequency_hz,
+                      policy_phase_rad, policy_center, startup_blend_duration_s,
+                      eid_tau_limit, plant_tau_max
+               FROM joint_configs WHERE experiment_id=?""",
+            (exp_id,),
+        ).fetchall()
+        out: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            tau_limit = row[7] if row[7] is not None else row[8]
+            out[int(row[0])] = {
+                "policy_source": row[1],
+                "policy_amplitude": row[2],
+                "policy_frequency_hz": row[3],
+                "policy_phase_rad": row[4],
+                "policy_center": row[5],
+                "startup_blend_duration_s": row[6],
+                "tau_limit": tau_limit,
+            }
+        return out
+
+    @staticmethod
+    def _first_existing(df: Any, names: list[str]) -> str | None:
+        for name in names:
+            if name in df.columns:
+                return name
+        return None
+
+    @staticmethod
+    def _fit_sine(t: Any, y: Any, frequency_hz: float) -> dict[str, float] | None:
+        try:
+            import numpy as np
+        except ImportError:
+            return None
+        if len(t) < 3:
+            return None
+        w = 2.0 * math.pi * frequency_hz
+        x = np.column_stack([np.ones_like(t), np.sin(w * t), np.cos(w * t)])
+        try:
+            coeff, *_ = np.linalg.lstsq(x, y, rcond=None)
+        except Exception:
+            return None
+        bias, sin_coeff, cos_coeff = [float(v) for v in coeff]
+        amplitude = math.hypot(sin_coeff, cos_coeff)
+        phase = math.atan2(cos_coeff, sin_coeff)
+        return {"bias": bias, "amplitude": amplitude, "phase": phase}
+
+    @staticmethod
+    def _wrap_pi(value: float) -> float:
+        return (value + math.pi) % (2.0 * math.pi) - math.pi
+
+    @staticmethod
+    def _trapz_abs(values: Any, t: Any) -> float:
+        return ExperimentDB._trapz(values_abs=True, values=values, t=t)
+
+    @staticmethod
+    def _trapz_square(values: Any, t: Any) -> float:
+        return ExperimentDB._trapz(values_abs=False, values=values * values, t=t)
+
+    @staticmethod
+    def _trapz(values_abs: bool, values: Any, t: Any) -> float:
+        try:
+            import numpy as np
+        except ImportError:
+            return math.nan
+        y = np.abs(values) if values_abs else values
+        if len(y) == 0:
+            return math.nan
+        if len(y) == 1:
+            return 0.0
+        if hasattr(np, "trapezoid"):
+            return float(np.trapezoid(y, t))
+        return float(np.trapz(y, t))
+
     # ---- Import all runs ----
 
     def import_all_runs(self) -> int:
@@ -766,8 +1168,59 @@ class ExperimentDB:
                 imported += 1
                 print(f"  -> experiment_id={exp_id}")
 
+        paired = self._auto_pair_sibling_eid_pd_runs()
+        if paired:
+            print(f"Auto-paired {paired} EID/PD sibling run(s)")
+
         print(f"\nImported {imported}/{len(run_dirs)} runs")
         return imported
+
+    def _auto_pair_sibling_eid_pd_runs(self) -> int:
+        """Pair simple sibling EID/PD runs that share the same parent directory."""
+        conn = self._connect()
+        paired = 0
+        try:
+            rows = conn.execute(
+                """SELECT experiment_id, run_id, controller_method, run_dir,
+                          COALESCE(disturb_type, 'none')
+                   FROM experiments
+                   WHERE controller_method IN ('EID', 'PD')"""
+            ).fetchall()
+            groups: dict[tuple[str, str], dict[str, list[tuple[int, str]]]] = {}
+            for exp_id, run_id, method, run_dir, disturb in rows:
+                d = Path(str(run_dir))
+                parent = str(d.parent.as_posix()) if str(run_dir) else ""
+                key = (parent, disturb or "none")
+                groups.setdefault(key, {"EID": [], "PD": []})
+                groups[key][str(method)].append((int(exp_id), str(run_id)))
+
+            for (parent, disturb), by_method in groups.items():
+                if len(by_method["EID"]) != 1 or len(by_method["PD"]) != 1:
+                    continue
+                eid_exp_id, eid_run = by_method["EID"][0]
+                pd_exp_id, pd_run = by_method["PD"][0]
+                exists = conn.execute(
+                    """SELECT 1 FROM comparison_pairs
+                       WHERE eid_experiment_id=? AND pd_experiment_id=?""",
+                    (eid_exp_id, pd_exp_id),
+                ).fetchone()
+                if exists:
+                    continue
+                conn.execute(
+                    """INSERT OR REPLACE INTO comparison_pairs
+                       (eid_experiment_id, pd_experiment_id, disturb_type, notes)
+                       VALUES (?, ?, ?, ?)""",
+                    (eid_exp_id, pd_exp_id, disturb,
+                     f"Auto-paired sibling runs under {parent}: {eid_run} vs {pd_run}"),
+                )
+                paired += 1
+            conn.commit()
+            return paired
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     # ---- Rebuild ----
 
@@ -775,6 +1228,8 @@ class ExperimentDB:
         """Drop all tables, recreate, and reimport all runs."""
         conn = self._connect()
         try:
+            conn.execute("DROP TABLE IF EXISTS control_metrics")
+            conn.execute("DROP TABLE IF EXISTS timeseries_files")
             conn.execute("DROP TABLE IF EXISTS ablation_configs")
             conn.execute("DROP TABLE IF EXISTS comparison_results")
             conn.execute("DROP TABLE IF EXISTS comparison_pairs")
@@ -980,6 +1435,8 @@ class ExperimentDB:
             n_comparisons = conn.execute("SELECT COUNT(*) FROM comparison_results").fetchone()[0]
             n_ablations = conn.execute("SELECT COUNT(*) FROM ablation_configs").fetchone()[0]
             n_pairs = conn.execute("SELECT COUNT(*) FROM comparison_pairs").fetchone()[0]
+            n_ts = conn.execute("SELECT COUNT(*) FROM timeseries_files").fetchone()[0]
+            n_metrics = conn.execute("SELECT COUNT(*) FROM control_metrics").fetchone()[0]
 
             print(f"Database: {self.db_path}")
             print(f"  experiments:        {n_exps}")
@@ -987,6 +1444,8 @@ class ExperimentDB:
             print(f"  joint_summaries:    {n_summaries}")
             print(f"  comparison_results: {n_comparisons}")
             print(f"  comparison_pairs:   {n_pairs}")
+            print(f"  timeseries_files:   {n_ts}")
+            print(f"  control_metrics:    {n_metrics}")
             print(f"  ablation_configs:   {n_ablations}")
 
             if n_exps > 0:
@@ -1049,6 +1508,24 @@ class ExperimentDB:
                 found["controller_summary"] = csv_file
         return found
 
+    def _estimate_run_timestamp(self, run_dir: Path, config_path: Path,
+                                summary_files: dict[str, Path]) -> datetime:
+        """Estimate run timestamp from source artifacts, ignoring generated Parquet."""
+        candidates: list[Path] = [config_path]
+        candidates.extend(summary_files.values())
+        ts_csv = self._find_timeseries_csv(run_dir)
+        if ts_csv is not None:
+            candidates.append(ts_csv)
+        mtimes = []
+        for path in candidates:
+            try:
+                mtimes.append(path.stat().st_mtime)
+            except OSError:
+                pass
+        if mtimes:
+            return datetime.fromtimestamp(max(mtimes))
+        return datetime.fromtimestamp(run_dir.stat().st_mtime)
+
     def _estimate_duration(self, run_dir: Path, summary_files: dict) -> float | None:
         """Estimate experiment duration from available files."""
         # Try reading from summary CSV first (count rows * dt approximation)
@@ -1099,13 +1576,12 @@ class ExperimentDB:
 # ---------------------------------------------------------------------------
 
 def csv_to_parquet(csv_path: Path, parquet_path: Path, chunk_size: int = 50000) -> None:
-    """Convert a C++ stepper raw CSV log to Parquet tall format.
+    """Convert a C++ stepper CSV log to Parquet while preserving signal columns.
 
-    The input CSV has columns: cycle, t, dt, lowstate_age, joint_id,
-    q, dq, tau_est, q_cmd, dq_cmd, kp_cmd, kd_cmd, tau_cmd, flags,
-    debug_0 ... debug_31
-
-    Output Parquet uses tall format: one (cycle, joint_id) row per record.
+    New MuJoCo logs already contain semantic signal names such as q_actual,
+    q_ref_shaped, u_t, and tau_cmd. Older raw logs may still contain debug_N
+    columns; those are renamed when no semantic column with the target name
+    already exists.
     """
     try:
         import pandas as pd
@@ -1115,33 +1591,20 @@ def csv_to_parquet(csv_path: Path, parquet_path: Path, chunk_size: int = 50000) 
 
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Read CSV in chunks and convert
     chunks: list[pd.DataFrame] = []
     total_rows = 0
 
     for chunk in pd.read_csv(csv_path, chunksize=chunk_size):
-        # The raw log has one row per (cycle, joint), so we can use it directly
-        # but rename columns to our standard names
-
-        # Map debug_N columns to meaningful names
         renames = {}
         for idx, (col_name, _) in DEBUG_COLUMN_MAP.items():
             old = f"debug_{idx}"
-            if old in chunk.columns:
+            if old in chunk.columns and col_name not in chunk.columns:
                 renames[old] = col_name
 
         if renames:
             chunk = chunk.rename(columns=renames)
 
-        # Select columns we want to keep
-        keep_cols = [
-            "cycle", "t", "dt", "lowstate_age", "joint_id",
-            "q", "dq", "tau_est", "tau_cmd", "flags",
-        ]
-        keep_cols += [name for name, _ in DEBUG_COLUMN_MAP.values()]
-        keep_cols = [c for c in keep_cols if c in chunk.columns]
-
-        chunks.append(chunk[keep_cols])
+        chunks.append(chunk)
         total_rows += len(chunk)
 
     if not chunks:
@@ -1150,9 +1613,12 @@ def csv_to_parquet(csv_path: Path, parquet_path: Path, chunk_size: int = 50000) 
 
     df = pd.concat(chunks, ignore_index=True)
 
-    # Downcast numeric columns for efficiency
     for col in df.columns:
-        if col in ("cycle", "joint_id", "flags"):
+        if col in ("cycle", "joint_id", "flags", "joint_flags"):
+            try:
+                df[col] = df[col].astype("int32")
+            except (ValueError, TypeError):
+                pass
             continue
         if df[col].dtype == "float64":
             df[col] = df[col].astype("float32")

@@ -167,7 +167,7 @@ CREATE TABLE comparison_results (
 
     eid_rmse        REAL,
     pd_rmse         REAL,
-    rmse_ratio      REAL,           -- PD_RMSE / EID_RMSE (<1 表示 EID 更优)
+    rmse_ratio      REAL,           -- PD_RMSE / EID_RMSE (>1 表示 EID 更优；<1 表示 PD 更优)
     eid_max_error   REAL,
     pd_max_error    REAL,
     eid_mean_abs_tau REAL,
@@ -200,6 +200,42 @@ CREATE TABLE ablation_configs (
     UNIQUE(experiment_id)
 );
 ```
+
+### 3.6 `timeseries_files` 与 `control_metrics` — 控制工程诊断
+
+```sql
+CREATE TABLE timeseries_files (
+    file_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id  INTEGER NOT NULL REFERENCES experiments(experiment_id),
+    path           TEXT NOT NULL,
+    format         TEXT NOT NULL DEFAULT 'parquet',
+    rows           INTEGER,
+    sample_rate_hz REAL,
+    schema_version TEXT NOT NULL DEFAULT '1',
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(experiment_id, path)
+);
+
+CREATE TABLE control_metrics (
+    metric_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id     INTEGER NOT NULL REFERENCES experiments(experiment_id),
+    joint_id          INTEGER NOT NULL,
+    metric_name       TEXT NOT NULL,
+    value             REAL,
+    unit              TEXT,
+    window_start_s    REAL,
+    window_end_s      REAL,
+    source            TEXT,
+    algorithm_version TEXT NOT NULL DEFAULT 'control_metrics_v1',
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+第一版指标包括 `q_rmse`, `q_mae`, `q_iae`, `q_max_abs_error`,
+`tau_mean_abs`, `tau_rms`, `tau_abs_max`, `tau_energy`,
+`tau_saturation_duty`, `joint_flag_any`。对非零幅值正弦轨迹额外计算
+`tracking_gain`, `phase_lag_rad`, `phase_lag_deg`, `amplitude_error`,
+`bias_error`。
 
 ---
 
@@ -295,16 +331,21 @@ ORDER BY jc.kp;
 
 ```sql
 SELECT
-    jc.joint_name,
-    AVG(cr.eid_rmse) AS avg_eid_rmse,
-    AVG(cr.pd_rmse)  AS avg_pd_rmse,
-    AVG(cr.rmse_ratio) AS avg_ratio,
+    ejc.joint_name,
+    AVG(em.value) AS avg_eid_rmse,
+    AVG(pm.value) AS avg_pd_rmse,
+    AVG(pm.value / NULLIF(em.value, 0)) AS eid_improvement_factor,
     COUNT(*) AS n_runs
-FROM sqlite_scan('data/experiments.db', 'comparison_results') cr
-JOIN sqlite_scan('data/experiments.db', 'joint_configs') jc
-    ON cr.experiment_id = jc.experiment_id AND cr.joint_id = jc.joint_id
-GROUP BY jc.joint_name
-ORDER BY avg_ratio;
+FROM sqlite_scan('data/experiments.db', 'comparison_pairs') cp
+JOIN sqlite_scan('data/experiments.db', 'control_metrics') em
+    ON em.experiment_id = cp.eid_experiment_id AND em.metric_name = 'q_rmse'
+JOIN sqlite_scan('data/experiments.db', 'control_metrics') pm
+    ON pm.experiment_id = cp.pd_experiment_id
+   AND pm.metric_name = em.metric_name AND pm.joint_id = em.joint_id
+JOIN sqlite_scan('data/experiments.db', 'joint_configs') ejc
+    ON ejc.experiment_id = cp.eid_experiment_id AND ejc.joint_id = em.joint_id
+GROUP BY ejc.joint_name
+ORDER BY eid_improvement_factor DESC;
 ```
 
 ### 5.3 跨实验时序叠加

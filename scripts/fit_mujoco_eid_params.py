@@ -94,28 +94,28 @@ REFERENCE_DEFAULTS = {
     19: (0.3, 0.08, 0.08, -1.5707963267948966),
 }
 
-# Uniform 80% of official MuJoCo ctrlrange peak torque — see h1.xml actuator section.
-# Previous per-joint fractions (3%–30%) were unnecessarily conservative for simulation.
+# Use the full official MuJoCo ctrlrange peak torque; see h1.xml actuator section.
+# Earlier generated configs used a conservative 80% fraction for simulation.
 TAU_LIMIT_FRACTIONS = {
-    0: 0.80,
-    1: 0.80,
-    2: 0.80,
-    3: 0.80,
-    4: 0.80,
-    5: 0.80,
-    6: 0.80,
-    7: 0.80,
-    8: 0.80,
-    10: 0.80,
-    11: 0.80,
-    12: 0.80,
-    13: 0.80,
-    14: 0.80,
-    15: 0.80,
-    16: 0.80,
-    17: 0.80,
-    18: 0.80,
-    19: 0.80,
+    0: 1.00,
+    1: 1.00,
+    2: 1.00,
+    3: 1.00,
+    4: 1.00,
+    5: 1.00,
+    6: 1.00,
+    7: 1.00,
+    8: 1.00,
+    10: 1.00,
+    11: 1.00,
+    12: 1.00,
+    13: 1.00,
+    14: 1.00,
+    15: 1.00,
+    16: 1.00,
+    17: 1.00,
+    18: 1.00,
+    19: 1.00,
 }
 
 DQ_LIMITS = {
@@ -172,27 +172,74 @@ KD_LIMITS = {
     19: 2.0,
 }
 
+EID_PARAM_GROUPS = [
+    (
+        "legs",
+        [0, 1, 2, 3, 4, 5, 7, 8],
+        {
+            "kp": 60.0,
+            "kd": 10.0,
+            "observer_gain_q": 0.8,
+            "observer_gain_dq": 0.5,
+            "filter_alpha": 0.7,
+        },
+    ),
+    (
+        "waist",
+        [6],
+        {
+            "kp": 45.0,
+            "kd": 8.0,
+            "observer_gain_q": 0.6,
+            "observer_gain_dq": 0.4,
+            "filter_alpha": 0.6,
+        },
+    ),
+    (
+        "ankle_shoulder_main",
+        [10, 11, 12, 13, 16, 17],
+        {
+            "kp": 40.0,
+            "kd": 6.0,
+            "observer_gain_q": 0.6,
+            "observer_gain_dq": 0.4,
+            "filter_alpha": 0.6,
+        },
+    ),
+    (
+        "arm_small",
+        [14, 15, 18, 19],
+        {
+            "kp": 30.0,
+            "kd": 4.0,
+            "observer_gain_q": 0.5,
+            "observer_gain_dq": 0.3,
+            "filter_alpha": 0.5,
+        },
+    ),
+]
+
 DEFAULT_JOINT_TAU_LIMITS = {
-    0: 160.0,
-    1: 160.0,
-    2: 240.0,
-    3: 160.0,
-    4: 160.0,
-    5: 240.0,
-    6: 160.0,
-    7: 160.0,
-    8: 160.0,
+    0: 200.0,
+    1: 200.0,
+    2: 300.0,
+    3: 200.0,
+    4: 200.0,
+    5: 300.0,
+    6: 200.0,
+    7: 200.0,
+    8: 200.0,
     9: 0.0,
-    10: 32.0,
-    11: 32.0,
-    12: 32.0,
-    13: 32.0,
-    14: 14.4,
-    15: 14.4,
-    16: 32.0,
-    17: 32.0,
-    18: 14.4,
-    19: 14.4,
+    10: 40.0,
+    11: 40.0,
+    12: 40.0,
+    13: 40.0,
+    14: 18.0,
+    15: 18.0,
+    16: 40.0,
+    17: 40.0,
+    18: 18.0,
+    19: 18.0,
 }
 
 
@@ -405,8 +452,25 @@ def write_config(
         "    inverse_q_weight: 0.0",
         "    inverse_dq_weight: 0.0",
         "",
-        "  joints:",
+        "  groups:",
     ]
+
+    for group_name, joint_ids, params in EID_PARAM_GROUPS:
+        lines.extend(
+            [
+                f"    {group_name}:",
+                f"      joints: [{', '.join(str(joint_id) for joint_id in joint_ids)}]",
+            ]
+        )
+        for key, value in params.items():
+            lines.append(f"      {key}: {yaml_float(value)}")
+
+    lines.extend(
+        [
+            "",
+            "  joints:",
+        ]
+    )
 
     by_joint = {r.info.index: r for r in results}
     for joint_id in ACTIVE_JOINTS:
@@ -417,13 +481,6 @@ def write_config(
                 f"    {joint_id}:",
                 f"      name: {DISPLAY_NAMES[joint_id]}",
                 f"      enabled: {'true' if enabled_overrides.get(joint_id, True) else 'false'}",
-                "      kp: 45.0",
-                "      kd: 8.0",
-                "      observer_gain_q: 0.25",
-                "      observer_gain_dq: 0.25",
-                "      filter_alpha: 0.5",
-                "      inverse_q_weight: 0.0",
-                "      inverse_dq_weight: 0.0",
                 f"      policy_center: {yaml_float(center)}",
                 f"      policy_amplitude: {yaml_float(amp)}",
                 f"      policy_frequency_hz: {yaml_float(freq)}",
