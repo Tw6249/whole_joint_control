@@ -102,6 +102,8 @@ python scripts/db_manager.py pair <eid_exp_id> <pd_exp_id>
 | `joint_summaries` | 单控制器汇总指标 | q_rmse, q_max_error, tau_abs_max, tau_mean_abs |
 | `comparison_pairs` | EID/PD 实验配对 | eid_experiment_id, pd_experiment_id, disturb_type |
 | `comparison_results` | (遗留) 旧的 EID vs PD 合并数据 | eid_rmse, pd_rmse, rmse_ratio |
+| `timeseries_files` | Parquet 时序文件索引 | path, rows, sample_rate_hz |
+| `control_metrics` | 控制工程诊断指标长表 | q_iae, tau_energy, tracking_gain, phase_lag_deg |
 
 ---
 
@@ -116,23 +118,22 @@ python scripts/db_manager.py pair <eid_exp_id> <pd_exp_id>
 ### 2. Joint Analysis — 关节性能对比
 
 - 从 `comparison_pairs` + `joint_summaries` 计算 EID vs PD RMSE 柱状图
-- RMSE 比率热力表
+- `PD_RMSE / EID_RMSE` 称为 EID improvement factor；`>1` 表示 EID RMSE 更低，`<1` 表示 PD RMSE 更低
 
-### 3. Param Sweep — 参数灵敏度
+### 3. Control Metrics — 控制指标诊断
 
-- 选择控制器类型 → 关节 → 参数 vs 指标散点图
-- 支持 kp, kd, tau_limit 等参数维度
+- 按关节和控制器展示 q_rmse, q_iae, tau_energy, tau_saturation_duty 等指标
+- 用于判断误差、控制代价和饱和程度之间的权衡
 
-### 4. Disturbance — 扰动分析
+### 4. Sine Tracking — 正弦跟踪诊断
 
-- 关节×扰动热力图
-- 可选择 RMSE Ratio / EID RMSE / PD RMSE 视图
-- 身体区域汇总
+- 展示 tracking_gain, phase_lag_deg, amplitude_error, bias_error
+- 支持 EID/PD 配对对比
 
 ### 5. Timeseries — 时序曲线
 
 - 选择任意实验 → 自由勾选信号 → 绘图
-- 支持 per-controller CSV 和旧 combined CSV 两种格式
+- 优先读取 `timeseries.parquet`；缺失时回退到 per-controller CSV 或旧 combined CSV
 
 ### 6. SQL Query — 自定义查询
 
@@ -148,14 +149,14 @@ python scripts/db_manager.py pair <eid_exp_id> <pd_exp_id>
 SELECT es.joint_id, jc.joint_name,
        AVG(es.q_rmse) AS eid_rmse,
        AVG(ps.q_rmse) AS pd_rmse,
-       AVG(ps.q_rmse) / NULLIF(AVG(es.q_rmse), 0) AS ratio
+       AVG(ps.q_rmse) / NULLIF(AVG(es.q_rmse), 0) AS eid_improvement_factor
 FROM comparison_pairs cp
 JOIN joint_summaries es ON cp.eid_experiment_id = es.experiment_id
 JOIN joint_summaries ps ON cp.pd_experiment_id = ps.experiment_id AND es.joint_id = ps.joint_id
 JOIN joint_configs jc ON es.experiment_id = jc.experiment_id AND es.joint_id = jc.joint_id
 WHERE es.q_rmse IS NOT NULL
 GROUP BY es.joint_id
-ORDER BY ratio;
+ORDER BY eid_improvement_factor DESC;
 ```
 
 ### 找某个关节的最佳 EID 实验

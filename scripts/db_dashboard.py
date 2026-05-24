@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""H1 Joint Control 鈥?Experiment Analysis Dashboard."""
+"""H1 Joint Control 閳?Experiment Analysis Dashboard."""
 
 from __future__ import annotations
 
@@ -97,12 +97,13 @@ SIGNAL_CATEGORIES = {
     "Velocity": ["dq_actual", "dq_ref_shaped", "dq_ref_raw", "dq_ref_shaped_next",
                   "dq_error_shaped", "dq_error_raw", "motor_dq"],
     "Torque": ["u_t", "u_raw", "u_star", "u_feedback", "tau_cmd",
-               "observer_tau_applied", "motor_tau"],
+               "tau_command", "observer_tau_applied", "motor_tau"],
     "Observer": ["eta_q", "eta_dq", "x_hat_q", "x_hat_dq", "x_bar_q", "x_bar_dq",
                   "observer_qacc"],
     "EID Reference": ["r_d_q", "r_d_dq", "e_q", "e_dq"],
     "Inverse Model": ["rho_q", "rho_dq"],
     "Command": ["kp_cmd", "kd_cmd", "motor_kp", "motor_kd"],
+    "Safety": ["saturation"],
 }
 
 
@@ -122,9 +123,17 @@ def _query(sql: str, params: tuple = (), db_path: str = "") -> pd.DataFrame:
 def load_exps(db: str) -> pd.DataFrame:
     return _query("""
         SELECT experiment_id, run_id, timestamp, object_type,
-               controller_method, duration_s, run_dir
+               controller_method, duration_s, run_dir, disturb_type
         FROM experiments ORDER BY timestamp DESC
     """, db_path=db)
+
+
+def table_exists(db: str, table: str) -> bool:
+    df = _query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table,), db_path=db,
+    )
+    return not df.empty
 
 
 def load_comps(db: str) -> pd.DataFrame:
@@ -190,7 +199,7 @@ def load_paired_comparison(db: str) -> pd.DataFrame:
                es.tau_mean_abs AS eid_mean_abs_tau,
                ps.q_rmse AS pd_rmse, ps.q_max_error AS pd_max_error,
                ps.tau_mean_abs AS pd_mean_abs_tau,
-               ps.q_rmse / NULLIF(es.q_rmse, 0) AS rmse_ratio,
+               ps.q_rmse / NULLIF(es.q_rmse, 0) AS eid_improvement_factor,
                ejc.kp, ejc.kd, ejc.eid_tau_limit,
                ejc.observer_gain_q, ejc.observer_gain_dq, ejc.filter_alpha
         FROM comparison_pairs cp
@@ -206,11 +215,95 @@ def load_paired_comparison(db: str) -> pd.DataFrame:
     """, db_path=db)
 
 
+def load_control_metrics(db: str) -> pd.DataFrame:
+    if not table_exists(db, "control_metrics"):
+        return pd.DataFrame()
+    return _query("""
+        SELECT e.experiment_id, e.run_id, e.timestamp, e.controller_method,
+               e.disturb_type, cm.joint_id, jc.joint_name,
+               cm.metric_name, cm.value, cm.unit,
+               cm.window_start_s, cm.window_end_s, cm.source
+        FROM control_metrics cm
+        JOIN experiments e ON cm.experiment_id = e.experiment_id
+        LEFT JOIN joint_configs jc ON cm.experiment_id = jc.experiment_id
+             AND cm.joint_id = jc.joint_id
+        WHERE e.controller_method IN ('EID', 'PD')
+        ORDER BY e.timestamp DESC, cm.joint_id, cm.metric_name
+    """, db_path=db)
+
+
+def load_paired_metric(metric_name: str, db: str) -> pd.DataFrame:
+    if not table_exists(db, "control_metrics"):
+        return pd.DataFrame()
+    return _query("""
+        SELECT cp.pair_id,
+               eid.run_id AS eid_run_id, pd.run_id AS pd_run_id,
+               COALESCE(eid.disturb_type, cp.disturb_type, 'none') AS disturb_type,
+               em.joint_id, ejc.joint_name,
+               em.value AS eid_value, pm.value AS pd_value,
+               pm.value / NULLIF(em.value, 0) AS pd_over_eid
+        FROM comparison_pairs cp
+        JOIN experiments eid ON cp.eid_experiment_id = eid.experiment_id
+        JOIN experiments pd ON cp.pd_experiment_id = pd.experiment_id
+        JOIN control_metrics em ON em.experiment_id = cp.eid_experiment_id
+             AND em.metric_name = ?
+        JOIN control_metrics pm ON pm.experiment_id = cp.pd_experiment_id
+             AND pm.metric_name = em.metric_name
+             AND pm.joint_id = em.joint_id
+        LEFT JOIN joint_configs ejc ON ejc.experiment_id = cp.eid_experiment_id
+             AND ejc.joint_id = em.joint_id
+        ORDER BY eid.timestamp DESC, em.joint_id
+    """, (metric_name,), db_path=db)
+
+
+def load_dashboard_stats(db: str) -> dict[str, float]:
+    exps = load_exps(db)
+    stats: dict[str, float] = {
+        "experiments": float(len(exps)),
+        "timeseries_files": 0.0,
+        "parquet_coverage": 0.0,
+        "avg_saturation": math.nan,
+        "flagged_joints": 0.0,
+    }
+    if table_exists(db, "timeseries_files"):
+        ts = _query("SELECT COUNT(*) AS n FROM timeseries_files", db_path=db)
+        stats["timeseries_files"] = float(ts.iloc[0]["n"]) if not ts.empty else 0.0
+    if len(exps):
+        stats["parquet_coverage"] = 100.0 * stats["timeseries_files"] / len(exps)
+    if table_exists(db, "control_metrics"):
+        sat = _query("""
+            SELECT AVG(value) AS avg_sat FROM control_metrics
+            WHERE metric_name='tau_saturation_duty'
+        """, db_path=db)
+        flags = _query("""
+            SELECT COUNT(*) AS n FROM control_metrics
+            WHERE metric_name='joint_flag_any' AND value != 0
+        """, db_path=db)
+        if not sat.empty and pd.notna(sat.iloc[0]["avg_sat"]):
+            stats["avg_saturation"] = float(sat.iloc[0]["avg_sat"])
+        if not flags.empty:
+            stats["flagged_joints"] = float(flags.iloc[0]["n"])
+    return stats
+
+
 def load_ts_runs(repo_root: Path, db: str) -> pd.DataFrame:
-    """Return experiments that have any timeseries CSV available."""
+    """Return experiments that have a Parquet or CSV timeseries available."""
     df = load_exps(db)
     if df.empty:
         return df
+    if table_exists(db, "timeseries_files"):
+        ts = _query("""
+            SELECT experiment_id, path AS timeseries_path, format AS timeseries_format
+            FROM timeseries_files
+        """, db_path=db)
+        if not ts.empty:
+            df = df.merge(ts, on="experiment_id", how="left")
+        else:
+            df["timeseries_path"] = None
+            df["timeseries_format"] = None
+    else:
+        df["timeseries_path"] = None
+        df["timeseries_format"] = None
     rows = []
     ts_files = [
         "mujoco_closed_loop_log.csv",
@@ -219,6 +312,13 @@ def load_ts_runs(repo_root: Path, db: str) -> pd.DataFrame:
         "eid_vs_pd_timeseries.csv",
     ]
     for _, r in df.iterrows():
+        if pd.notna(r.get("timeseries_path")):
+            p = Path(str(r["timeseries_path"]))
+            if not p.is_absolute():
+                p = repo_root / p
+            if p.exists():
+                rows.append(r.to_dict())
+                continue
         run_dir = Path(str(r["run_dir"]))
         if not run_dir.is_absolute():
             run_dir = repo_root / run_dir
@@ -237,58 +337,67 @@ def inject_css() -> None:
     st.markdown("""<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-    * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    /* Use Streamlit default fonts */
 
     .main .block-container { padding: 2rem 3rem; max-width: 1400px; }
 
-    /* KPI cards */
-    .kpi-grid { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    /* KPI cards with smooth premium transition */
+    .kpi-grid { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
     .kpi-card {
-        flex: 1; min-width: 140px;
-        background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-        padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
+        flex: 1; min-width: 150px;
+        background: #ffffff; border: 1px solid #f1f5f9; border-radius: 16px;
+        padding: 18px 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
+        transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .kpi-card .label { font-size: 0.75rem; color: #9ca3af; text-transform: uppercase; letter-spacing: .05em; }
-    .kpi-card .value { font-size: 1.6rem; font-weight: 700; color: #1f2937; margin-top: 2px; }
+    .kpi-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 20px -3px rgba(0,0,0,0.06), 0 4px 10px -2px rgba(0,0,0,0.03);
+        border-color: #3b82f6;
+    }
+    .kpi-card .label { font-size: 0.78rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .06em; }
+    .kpi-card .value { font-size: 1.75rem; font-weight: 700; color: #0f172a; margin-top: 4px; }
 
     /* Section cards */
     .section-card {
-        background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-        padding: 20px 24px; margin-bottom: 1.25rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,.04);
+        background: #fff; border: 1px solid #f1f5f9; border-radius: 16px;
+        padding: 24px 28px; margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.03);
     }
 
     /* Hide Streamlit chrome */
     #MainMenu, footer, header[data-testid="stHeader"] { display: none; }
-    section[data-testid="stSidebar"] { background: #f8f9fb; }
-    section[data-testid="stSidebar"] .block-container { padding: 1.5rem 1rem; }
+    section[data-testid="stSidebar"] { background: #f8fafc; border-right: 1px solid #f1f5f9; }
+    section[data-testid="stSidebar"] .block-container { padding: 2rem 1.25rem; }
 
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; background: transparent; }
+    /* Premium Tab styling */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; background: #f1f5f9; padding: 6px; border-radius: 12px; margin-bottom: 1.5rem; }
     .stTabs [data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0; padding: 10px 20px;
-        font-weight: 500; font-size: 0.9rem; border: none;
-        color: #6b7280; background: transparent;
+        border-radius: 8px; padding: 8px 16px;
+        font-weight: 600; font-size: 0.88rem; border: none;
+        color: #475569; background: transparent;
+        transition: all 0.2s ease;
     }
     .stTabs [aria-selected="true"] {
-        color: #3b82f6; background: #fff;
-        border-bottom: 2px solid #3b82f6; border-radius: 8px 8px 0 0;
+        color: #1e40af !important; background: #ffffff !important;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
     }
 
     /* Buttons */
     .stButton > button {
-        border-radius: 8px; font-weight: 500; border: 1px solid #d1d5db;
-        background: #fff; color: #374151; padding: 6px 14px;
+        border-radius: 10px; font-weight: 600; border: 1px solid #e2e8f0;
+        background: #fff; color: #334155; padding: 8px 18px;
+        transition: all 0.2s ease;
     }
-    .stButton > button:hover { border-color: #3b82f6; color: #3b82f6; }
+    .stButton > button:hover { border-color: #3b82f6; color: #3b82f6; transform: translateY(-1px); }
 
     /* Multiselect tag styling */
-    span[data-baseweb="tag"] { border-radius: 6px !important; }
+    span[data-baseweb="tag"] { border-radius: 8px !important; font-weight: 500; }
 
     /* Metric adjustments */
     div[data-testid="stMetric"] {
-        background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
-        padding: 12px 16px;
+        background: #fff; border: 1px solid #f1f5f9; border-radius: 14px;
+        padding: 14px 18px;
+        box-shadow: 0 2px 4px -1px rgba(0,0,0,0.02);
     }
     </style>""", unsafe_allow_html=True)
 
@@ -311,9 +420,9 @@ def section(title: str):
 def ratio_badge(val: float | None) -> str:
     if val is None or not math.isfinite(val):
         return ""
-    if val < 0.5:
+    if val > 1.5:
         return "background-color:#d1fae5;color:#065f46;padding:2px 8px;border-radius:6px;font-weight:600"
-    if val < 1.0:
+    if val > 1.0:
         return "background-color:#e5e7eb;color:#374151;padding:2px 8px;border-radius:6px"
     return "background-color:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:6px;font-weight:600"
 
@@ -336,11 +445,12 @@ def compact_altair_chart(chart: alt.Chart) -> None:
 # Pages
 # ---------------------------------------------------------------------------
 
+@st.fragment
 def page_overview(db: str) -> None:
     exps = load_exps(db)
     summaries = load_summaries(db)
     pairs = load_pairs(db)
-    legacy = load_comps(db)
+    stats = load_dashboard_stats(db)
 
     if exps.empty:
         st.info("No data yet. Run: `python scripts/db_manager.py import-all`")
@@ -353,13 +463,16 @@ def page_overview(db: str) -> None:
     n_eid = int((display_exps["controller_method"] == "EID").sum())
     n_pd = int((display_exps["controller_method"] == "PD").sum())
     n_pairs = len(pairs) if not pairs.empty else 0
-    n_summaries = len(summaries) if not summaries.empty else 0
     best_eid_rmse = summaries[summaries["controller_method"] == "EID"]["q_rmse"].min() if not summaries.empty else 0
+    avg_sat = stats["avg_saturation"]
 
     kpi_row([
         ("EID Experiments", n_eid, None),
         ("PD Experiments", n_pd, None),
         ("Comparison Pairs", n_pairs, None),
+        ("Parquet Coverage", f"{stats['parquet_coverage']:.0f}%", None),
+        ("Avg Saturation", f"{100.0 * avg_sat:.1f}%" if math.isfinite(avg_sat) else "-", None),
+        ("Flagged Joints", int(stats["flagged_joints"]), None),
         ("Best EID RMSE", f"{best_eid_rmse:.5f}" if best_eid_rmse else "-", None),
     ])
 
@@ -384,8 +497,8 @@ def page_overview(db: str) -> None:
     if disturb_f and "disturb_type" in filtered.columns:
         filtered = filtered[filtered["disturb_type"].isin(disturb_f)]
 
-    display = filtered[["run_id", "timestamp", "controller_method", "duration_s"]].copy()
-    display.columns = ["Run", "Time", "Method", "Duration (s)"]
+    display = filtered[["run_id", "timestamp", "controller_method", "disturb_type", "duration_s"]].copy()
+    display.columns = ["Run", "Time", "Method", "Disturbance", "Duration (s)"]
     st.dataframe(display, use_container_width=True, hide_index=True, height=350)
 
     # Show pairs table
@@ -396,6 +509,7 @@ def page_overview(db: str) -> None:
         st.dataframe(pair_display, use_container_width=True, hide_index=True, height=250)
 
 
+@st.fragment
 def page_joint_analysis(db: str) -> None:
     st.markdown("### Joint Performance")
 
@@ -406,6 +520,8 @@ def page_joint_analysis(db: str) -> None:
         if df.empty:
             st.info("No comparison data. Create comparison pairs or import experiments with summaries.")
             return
+        if "eid_improvement_factor" not in df.columns and "rmse_ratio" in df.columns:
+            df["eid_improvement_factor"] = df["rmse_ratio"]
         st.caption("Using legacy comparison_results data.")
 
     joints = sorted(df["joint_name"].unique())
@@ -418,7 +534,7 @@ def page_joint_analysis(db: str) -> None:
     with col2:
         sel_disturb = st.selectbox("Disturbance", ["all"] + disturbs, key="ja_disturb")
     with col3:
-        sort_by = st.selectbox("Sort by", ["RMSE Ratio", "EID RMSE", "PD RMSE"], key="ja_sort")
+        sort_by = st.selectbox("Sort by", ["EID Improvement", "EID RMSE", "PD RMSE"], key="ja_sort")
 
     filt = df[df["joint_name"].isin(sel_joints)] if sel_joints else df
     if sel_disturb != "all":
@@ -431,19 +547,20 @@ def page_joint_analysis(db: str) -> None:
     # If using legacy data, columns are already eid_rmse/pd_rmse
     eid_col = "eid_rmse"
     pd_col = "pd_rmse"
-    ratio_col = "rmse_ratio"
+    ratio_col = "eid_improvement_factor"
 
     agg = filt.groupby("joint_name").agg(
         eid=(eid_col, "mean"), pd=(pd_col, "mean"),
-        ratio=(ratio_col, "mean"), n=("pair_id" if "pair_id" in filt.columns else "experiment_id", "count"),
+        improvement=(ratio_col, "mean"), n=("pair_id" if "pair_id" in filt.columns else "experiment_id", "count"),
     ).reset_index()
+    agg["winner"] = np.where(agg["improvement"] > 1.0, "EID", "PD")
 
     if sort_by == "EID RMSE":
         agg = agg.sort_values("eid")
     elif sort_by == "PD RMSE":
         agg = agg.sort_values("pd")
     else:
-        agg = agg.sort_values("ratio")
+        agg = agg.sort_values("improvement", ascending=False)
 
     chart_df = agg.melt(id_vars="joint_name", value_vars=["eid", "pd"],
                          var_name="Controller", value_name="RMSE (rad)")
@@ -460,30 +577,138 @@ def page_joint_analysis(db: str) -> None:
     ).properties(height=320)
     compact_altair_chart(bar)
 
-    st.markdown("#### RMSE Ratio  (PD / EID)")
-    st.caption("< 0.5 EID dominates | 0.5-1.0 EID better | > 1.0 PD better")
+    st.markdown("#### EID Improvement Factor  (PD RMSE / EID RMSE)")
+    st.caption("> 1.0 means EID has lower RMSE; < 1.0 means PD has lower RMSE.")
 
     def _style(sdf):
         s = sdf.style.format({
-            "EID RMSE": "{:.5f}", "PD RMSE": "{:.5f}", "Ratio": "{:.4f}",
+            "EID RMSE": "{:.5f}", "PD RMSE": "{:.5f}", "EID Improvement": "{:.4f}",
         }, na_rep="-")
-        if "Ratio" in sdf.columns:
+        if "EID Improvement" in sdf.columns:
             def _c(v):
                 if not isinstance(v, (int, float)) or not math.isfinite(v):
                     return ""
-                if v < 0.5:
+                if v > 1.5:
                     return "background-color:#d1fae5;color:#065f46;font-weight:600"
-                if v < 1.0:
+                if v > 1.0:
                     return "background-color:#f3f4f6;color:#374151"
                 return "background-color:#fee2e2;color:#991b1b;font-weight:600"
-            s = s.map(_c, subset=["Ratio"])
+            s = s.map(_c, subset=["EID Improvement"])
         return s
 
-    table = agg[["joint_name", "eid", "pd", "ratio", "n"]].copy()
-    table.columns = ["Joint", "EID RMSE", "PD RMSE", "Ratio", "Runs"]
+    table = agg[["joint_name", "eid", "pd", "improvement", "winner", "n"]].copy()
+    table.columns = ["Joint", "EID RMSE", "PD RMSE", "EID Improvement", "Winner", "Runs"]
     st.dataframe(_style(table), use_container_width=True, hide_index=True)
 
 
+@st.fragment
+def page_control_metrics(db: str) -> None:
+    st.markdown("### Control Metrics")
+    df = load_control_metrics(db)
+    if df.empty:
+        st.info("No control metrics yet. Run: `python scripts/db_manager.py rebuild`.")
+        return
+
+    metric_options = [
+        "q_rmse", "q_iae", "q_mae", "q_max_abs_error",
+        "tau_energy", "tau_saturation_duty", "tau_rms", "tau_abs_max",
+    ]
+    available = [m for m in metric_options if m in set(df["metric_name"])]
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        metric = st.selectbox("Metric", available, index=0, key="cm_metric")
+    with col2:
+        methods = sorted(df["controller_method"].dropna().unique())
+        method = st.selectbox("Controller", ["all"] + methods, key="cm_method")
+    with col3:
+        joints = sorted(df["joint_name"].dropna().unique())
+        sel_joints = st.multiselect("Joints", joints, default=[j for j in ["RightKnee", "RightHipPitch", "RightElbow"] if j in joints],
+                                    key="cm_joints")
+
+    filt = df[df["metric_name"] == metric].copy()
+    if method != "all":
+        filt = filt[filt["controller_method"] == method]
+    if sel_joints:
+        filt = filt[filt["joint_name"].isin(sel_joints)]
+    if filt.empty:
+        st.info("No metrics matching filters.")
+        return
+
+    agg = filt.groupby(["joint_name", "controller_method"], as_index=False).agg(
+        value=("value", "mean"), n=("value", "count"),
+    )
+    chart = alt.Chart(agg).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+        x=alt.X("joint_name:N", title=None, axis=alt.Axis(labelAngle=-30)),
+        y=alt.Y("value:Q", title=metric),
+        color=alt.Color("controller_method:N", title=None,
+                        scale=alt.Scale(domain=["EID", "PD"], range=[C["eid"], C["pd"]])),
+        xOffset="controller_method:N",
+        tooltip=["joint_name", "controller_method", alt.Tooltip("value:Q", format=".5f"), "n"],
+    ).properties(height=330)
+    compact_altair_chart(chart)
+
+    table = agg.pivot(index="joint_name", columns="controller_method", values="value").reset_index()
+    table.columns.name = None
+    st.dataframe(table, use_container_width=True, hide_index=True)
+
+
+@st.fragment
+def page_sine_tracking(db: str) -> None:
+    st.markdown("### Sine Tracking Diagnostics")
+    df = load_control_metrics(db)
+    if df.empty:
+        st.info("No control metrics yet. Run: `python scripts/db_manager.py rebuild`.")
+        return
+
+    sine_metrics = ["tracking_gain", "phase_lag_deg", "amplitude_error", "bias_error"]
+    df = df[df["metric_name"].isin(sine_metrics)].copy()
+    if df.empty:
+        st.info("No sine tracking metrics found. Zero-amplitude or non-sine joints are intentionally skipped.")
+        return
+
+    col1, col2 = st.columns(2)
+    with col1:
+        metric = st.selectbox("Metric", sine_metrics, key="st_metric")
+    with col2:
+        joints = sorted(df["joint_name"].dropna().unique())
+        sel_joints = st.multiselect("Joints", joints, default=[j for j in ["RightKnee", "RightHipPitch", "LeftHipPitch"] if j in joints],
+                                    key="st_joints")
+
+    filt = df[df["metric_name"] == metric]
+    if sel_joints:
+        filt = filt[filt["joint_name"].isin(sel_joints)]
+    if filt.empty:
+        st.info("No sine metrics matching filters.")
+        return
+
+    agg = filt.groupby(["joint_name", "controller_method"], as_index=False).agg(
+        value=("value", "mean"), n=("value", "count"),
+    )
+    chart = alt.Chart(agg).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+        x=alt.X("joint_name:N", title=None, axis=alt.Axis(labelAngle=-30)),
+        y=alt.Y("value:Q", title=metric),
+        color=alt.Color("controller_method:N", title=None,
+                        scale=alt.Scale(domain=["EID", "PD"], range=[C["eid"], C["pd"]])),
+        xOffset="controller_method:N",
+        tooltip=["joint_name", "controller_method", alt.Tooltip("value:Q", format=".5f"), "n"],
+    ).properties(height=320)
+    compact_altair_chart(chart)
+
+    paired = load_paired_metric(metric, db)
+    if not paired.empty:
+        if sel_joints:
+            paired = paired[paired["joint_name"].isin(sel_joints)]
+        if not paired.empty:
+            st.markdown("#### Paired EID vs PD")
+            paired_display = paired[["joint_name", "eid_value", "pd_value", "pd_over_eid"]].copy()
+            paired_display.columns = ["Joint", "EID", "PD", "PD / EID"]
+            st.dataframe(
+                paired_display.style.format({"EID": "{:.5f}", "PD": "{:.5f}", "PD / EID": "{:.4f}"}),
+                use_container_width=True, hide_index=True,
+            )
+
+
+@st.fragment
 def page_timeseries(db: str) -> None:
     st.markdown("### Timeseries Viewer")
 
@@ -505,7 +730,7 @@ def page_timeseries(db: str) -> None:
     selected_runs: list[str] = st.multiselect(
         "Experiments (select 1 or more to compare)",
         all_runs,
-        default=all_runs,  # select all by default
+        default=[],  # select nothing by default
         format_func=lambda rid: run_labels.get(rid, rid),
         key="ts_runs",
     )
@@ -516,12 +741,19 @@ def page_timeseries(db: str) -> None:
 
     # --- Load all selected experiments' timeseries ---
     @st.cache_data(show_spinner="Loading...")
-    def _find_ts_file(run_dir_str: str, repo_root_str: str) -> Path | None:
+    def _find_ts_file(run_dir_str: str, repo_root_str: str, preferred_path: str = "") -> Path | None:
         root = Path(repo_root_str)
+        if preferred_path:
+            p = Path(preferred_path)
+            if not p.is_absolute():
+                p = root / p
+            if p.exists():
+                return p
         d = Path(run_dir_str)
         if not d.is_absolute():
             d = root / d
-        for fname in ["mujoco_closed_loop_log.csv",
+        for fname in ["timeseries.parquet",
+                       "mujoco_closed_loop_log.csv",
                        "eid_mujoco_closed_loop_log.csv",
                        "pd_mujoco_closed_loop_log.csv",
                        "eid_vs_pd_timeseries.csv"]:
@@ -532,9 +764,18 @@ def page_timeseries(db: str) -> None:
 
     @st.cache_data(show_spinner="Loading...")
     def _load_ts(path_str: str) -> pd.DataFrame:
-        df = pd.read_csv(path_str)
+        path = Path(path_str)
+        if path.suffix.lower() == ".parquet":
+            df = pd.read_parquet(path)
+        else:
+            df = pd.read_csv(path)
         if "t" in df.columns:
             df["t"] = pd.to_numeric(df["t"], errors="coerce")
+        tau_col = next((c for c in ["u_t", "tau_cmd", "motor_tau"] if c in df.columns), None)
+        if tau_col and "tau_command" not in df.columns:
+            df["tau_command"] = pd.to_numeric(df[tau_col], errors="coerce")
+        if "saturation" not in df.columns and "joint_flags" in df.columns:
+            df["saturation"] = (pd.to_numeric(df["joint_flags"], errors="coerce").fillna(0) != 0).astype(int)
         return df
 
     # Load all selected dataframes, merge with exp_prefix
@@ -549,9 +790,10 @@ def page_timeseries(db: str) -> None:
         run_dir = Path(str(row["run_dir"]))
         if not run_dir.is_absolute():
             run_dir = repo_root / run_dir
-        ts_path = _find_ts_file(str(run_dir), str(repo_root))
+        preferred = str(row.get("timeseries_path") or "")
+        ts_path = _find_ts_file(str(run_dir), str(repo_root), preferred)
         if ts_path is None:
-            st.warning(f"No timeseries CSV for {run_id}")
+            st.warning(f"No timeseries data for {run_id}")
             continue
 
         df = _load_ts(str(ts_path))
@@ -566,12 +808,6 @@ def page_timeseries(db: str) -> None:
         st.error("Could not load any timeseries data.")
         return
 
-    # Merge all experiments on common cols
-    merged = all_dfs[0]
-    for df in all_dfs[1:]:
-        on_cols = [c for c in COMMON_COLS if c in merged.columns and c in df.columns]
-        merged = pd.merge(merged, df, on=on_cols, how="outer")
-
     # --- Signal helpers ---
     def base_signal_name(sig: str) -> str:
         """Strip experiment prefix to get base signal name."""
@@ -585,17 +821,24 @@ def page_timeseries(db: str) -> None:
                 return cat
         return "Other"
 
-    # All signal columns (with exp prefix), excluding metadata and unused debug slots
     _META_SIGNALS = {"flags", "joint_flags"}
-    all_signals = [c for c in merged.columns
-                   if c not in COMMON_COLS and base_signal_name(c) not in _META_SIGNALS]
 
-    joints = sorted(merged["joint_id"].unique())
+    # Collect all signals and joints across all dataframes without outer merging
+    all_signals_set = set()
+    joints_set = set()
+    for df in all_dfs:
+        joints_set.update(df["joint_id"].unique())
+        for c in df.columns:
+            if c not in COMMON_COLS and base_signal_name(c) not in _META_SIGNALS:
+                all_signals_set.add(c)
+
+    all_signals = sorted(list(all_signals_set))
+    joints = sorted(list(joints_set))
     jlabels = {j: f"J{j} {JOINT_NAMES.get(j, '')}" for j in joints}
 
     # --- Panel management ---
     if "ts_panels" not in st.session_state:
-        st.session_state["ts_panels"] = 2  # default 2 panels
+        st.session_state["ts_panels"] = 1  # default 1 panel
 
     panel_count = st.session_state["ts_panels"]
 
@@ -614,7 +857,7 @@ def page_timeseries(db: str) -> None:
     # Joint selection (shared across panels)
     sel_joints = st.multiselect(
         "Joints", joints,
-        default=[j for j in [2, 1, 15] if j in joints],
+        default=[],
         format_func=lambda j: jlabels[j], key="ts_joints",
     )
 
@@ -636,19 +879,7 @@ def page_timeseries(db: str) -> None:
     MAX_POINTS = 8000
 
     # Default signal selections per panel (base signal names)
-    PANEL_DEFAULTS: list[dict[str, set[str]]] = [
-        # Panel 0: Position + Torque, key signals
-        {
-            "Position": {"q_actual", "q_ref_shaped", "q_error_shaped"},
-            "Torque": {"u_t", "u_star"},
-        },
-        # Panel 1: Observer + EID Reference + Inverse Model, key signals
-        {
-            "Observer": {"eta_q", "x_bar_q", "x_hat_q"},
-            "EID Reference": {"e_q", "r_d_q"},
-            "Inverse Model": {"rho_q"},
-        },
-    ]
+    PANEL_DEFAULTS: list[dict[str, set[str]]] = []
 
     for panel_idx in range(panel_count):
         with st.expander(f"Panel {panel_idx + 1}", expanded=(panel_idx == 0)):
@@ -696,96 +927,140 @@ def page_timeseries(db: str) -> None:
                     st.caption("Select signals on the left.")
                     continue
 
-                ts_filtered = merged[merged["joint_id"].isin(sel_joints)].copy()
-                total_rows = len(ts_filtered)
-                if total_rows > MAX_POINTS:
-                    ts_filtered = ts_filtered.iloc[::max(1, total_rows // MAX_POINTS)]
-
-                # Build long-form dataframe for Altair
+                # Build long-form dataframe for Altair without outer merge
                 records = []
-                for _, r in ts_filtered.iterrows():
-                    for sig in panel_selected:
-                        if sig in ts_filtered.columns:
-                            v = r[sig]
-                            if pd.notna(v):
-                                # Extract experiment label from signal prefix
-                                exp_prefix = sig.split("_", 1)[0]
-                                exp_idx = int(exp_prefix[3:]) if exp_prefix.startswith("exp") else 0
-                                exp_label = selected_runs[exp_idx] if exp_idx < len(selected_runs) else "?"
-                                records.append({
-                                    "t": r["t"],
-                                    "Joint": jlabels[int(r["joint_id"])],
-                                    "Signal": sig,
-                                    "Experiment": exp_label,
-                                    "value": float(v),
-                                })
+                for df in all_dfs:
+                    ts_filtered = df[df["joint_id"].isin(sel_joints)].copy()
+                    if ts_filtered.empty:
+                        continue
+
+                    total_rows = len(ts_filtered)
+                    if total_rows > MAX_POINTS:
+                        ts_filtered = ts_filtered.iloc[::max(1, total_rows // MAX_POINTS)]
+
+                    for _, r in ts_filtered.iterrows():
+                        for sig in panel_selected:
+                            if sig in ts_filtered.columns:
+                                v = r[sig]
+                                if pd.notna(v):
+                                    # Extract experiment label from signal prefix
+                                    exp_prefix = sig.split("_", 1)[0]
+                                    exp_idx = int(exp_prefix[3:]) if exp_prefix.startswith("exp") else 0
+                                    exp_label = selected_runs[exp_idx] if exp_idx < len(selected_runs) else "?"
+                                    records.append({
+                                        "t": r["t"],
+                                        "Joint": jlabels[int(r["joint_id"])],
+                                        "Signal": sig,
+                                        "Experiment": exp_label,
+                                        "value": float(v),
+                                    })
                 lf = pd.DataFrame(records)
 
                 if lf.empty:
                     st.caption("No data points.")
                     continue
 
-                # Color: signal determines color, experiment determines shade
+                import plotly.graph_objects as go
+
                 # Group signals by base name for consistent coloring
                 base_names = sorted(set(base_signal_name(s) for s in panel_selected))
                 base_colors = {}
                 for j, bn in enumerate(base_names):
                     base_colors[bn] = color_palette[j % len(color_palette)]
 
-                def _sig_color_2(sig: str) -> str:
-                    return base_colors.get(base_signal_name(sig), C["muted"])
-
-                domain = sorted(panel_selected)
-                range_ = [_sig_color_2(s) for s in domain]
-
                 n_joints = len(sel_joints)
-                charts = []
+
+                # Render each joint as a beautifully styled, high-performance Plotly trace
                 for jid in sel_joints:
                     jname = jlabels[jid]
                     jlf = lf[lf["Joint"] == jname]
                     if jlf.empty:
                         continue
-                    # Build compound label: Experiment + Signal
-                    jlf = jlf.copy()
-                    jlf["Label"] = jlf["Experiment"] + " | " + jlf["Signal"].map(
-                        lambda s: base_signal_name(s).replace("_", " ")
-                    )
 
-                    ch = alt.Chart(jlf).mark_line(point=False, strokeWidth=1.5).encode(
-                        x=alt.X("t:Q", title="time (s)"),
-                        y=alt.Y("value:Q", title=None),
-                        color=alt.Color("Signal:N",
-                                        scale=alt.Scale(domain=domain, range=range_),
-                                        legend=alt.Legend(title=None, orient="top", labelLimit=300)),
-                        strokeDash=alt.StrokeDash("Experiment:N",
-                                                   legend=alt.Legend(title=None, orient="top")),
-                        tooltip=["t:Q", "Experiment:N", "Signal:N",
-                                 alt.Tooltip("value:Q", format=".5f")],
-                    ).properties(
-                        height=max(120, min(280, 600 // n_joints)),
-                        title=jname,
-                    )
-                    charts.append(ch)
+                    fig = go.Figure()
 
-                if charts:
-                    combined = alt.vconcat(*charts).resolve_scale(color="shared")
-                    compact_altair_chart(combined)
+                    experiments = jlf["Experiment"].unique()
+                    signals = jlf["Signal"].unique()
+
+                    # Distinguish different experiments using dashes
+                    dash_styles = ['solid', 'dash', 'dot', 'dashdot', 'longdash']
+                    exp_dash = {exp: dash_styles[i % len(dash_styles)] for i, exp in enumerate(experiments)}
+
+                    for sig in signals:
+                        for exp in experiments:
+                            sub_df = jlf[(jlf["Signal"] == sig) & (jlf["Experiment"] == exp)].sort_values("t")
+                            if sub_df.empty:
+                                continue
+
+                            base_sig = base_signal_name(sig)
+                            display_name = f"{exp} | {base_sig.replace('_', ' ')}"
+
+                            fig.add_trace(go.Scatter(
+                                x=sub_df["t"],
+                                y=sub_df["value"],
+                                name=display_name,
+                                mode="lines",
+                                line=dict(
+                                    color=base_colors.get(base_sig, C["muted"]),
+                                    width=2.0,
+                                    dash=exp_dash[exp]
+                                ),
+                                hovertemplate="%{y:.5f}<extra></extra>"
+                            ))
+
+                    fig.update_layout(
+                        title=dict(
+                            text=f"<b>{jname}</b>",
+                            font=dict(size=14, color=C["text"])
+                        ),
+                        height=max(220, min(340, 700 // n_joints)),
+                        margin=dict(l=15, r=15, t=45, b=15),
+                        hovermode="x unified",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="left",
+                            x=0,
+                            font=dict(size=10),
+                            bgcolor="rgba(255,255,255,0.7)"
+                        ),
+                        xaxis=dict(
+                            title="Time (s)" if jid == sel_joints[-1] else "",
+                            showgrid=True,
+                            gridcolor="#f1f5f9",
+                            linecolor="#e2e8f0",
+                            tickfont=dict(size=10)
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor="#f1f5f9",
+                            linecolor="#e2e8f0",
+                            tickfont=dict(size=10)
+                        )
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 
     # --- Per-joint stats ---
     with st.expander("Per-joint statistics", expanded=False):
         rows = []
         for jid in sel_joints:
-            jdf = merged[merged["joint_id"] == jid]
             r = {"Joint": JOINT_NAMES.get(jid, str(jid))}
-            for sig in all_signals:
-                s = jdf[sig].dropna() if sig in jdf.columns else pd.Series(dtype=float)
-                if len(s) > 0:
-                    r[f"{sig}_rms"] = f"{math.sqrt((s**2).mean()):.4f}"
+            for df in all_dfs:
+                jdf = df[df["joint_id"] == jid]
+                for sig in all_signals:
+                    if sig in jdf.columns:
+                        s = jdf[sig].dropna()
+                        if len(s) > 0:
+                            r[f"{sig}_rms"] = f"{math.sqrt((s**2).mean()):.4f}"
             rows.append(r)
         if rows:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+@st.fragment
 def page_config(db: str) -> None:
     st.markdown("### Config Inspector")
 
@@ -844,22 +1119,29 @@ def page_config(db: str) -> None:
                 st.info(f"EID counterpart: **{p['eid_run']}**")
 
 
+@st.fragment
 def page_query(db: str) -> None:
     st.markdown("### SQL Console")
     st.caption("Tables: `experiments` `joint_configs` `joint_summaries` `comparison_results` `ablation_configs`")
 
     sql = st.text_area("Query", height=140, key="sql_query", value="""SELECT
-    jc.joint_name,
-    cr.disturb_type,
-    AVG(cr.eid_rmse) AS eid_rmse,
-    AVG(cr.pd_rmse)  AS pd_rmse,
-    AVG(cr.rmse_ratio) AS ratio,
+    ejc.joint_name,
+    COALESCE(eid.disturb_type, cp.disturb_type, 'none') AS disturb_type,
+    AVG(em.value) AS eid_rmse,
+    AVG(pm.value) AS pd_rmse,
+    AVG(pm.value / NULLIF(em.value, 0)) AS eid_improvement_factor,
     COUNT(*) AS n
-FROM comparison_results cr
-JOIN joint_configs jc USING (experiment_id, joint_id)
-WHERE cr.eid_rmse IS NOT NULL
-GROUP BY jc.joint_name, cr.disturb_type
-ORDER BY AVG(cr.rmse_ratio)""")
+FROM comparison_pairs cp
+JOIN experiments eid ON cp.eid_experiment_id = eid.experiment_id
+JOIN experiments pd ON cp.pd_experiment_id = pd.experiment_id
+JOIN control_metrics em ON em.experiment_id = cp.eid_experiment_id
+    AND em.metric_name = 'q_rmse'
+JOIN control_metrics pm ON pm.experiment_id = cp.pd_experiment_id
+    AND pm.metric_name = em.metric_name AND pm.joint_id = em.joint_id
+JOIN joint_configs ejc ON ejc.experiment_id = cp.eid_experiment_id
+    AND ejc.joint_id = em.joint_id
+GROUP BY ejc.joint_name, disturb_type
+ORDER BY eid_improvement_factor DESC""")
 
     if st.button("Run", type="primary"):
         try:
@@ -879,9 +1161,17 @@ def main() -> None:
     st.set_page_config(page_title="H1 Control Analysis", page_icon="馃", layout="wide")
     inject_css()
 
+    # Premium Gradient Title Block
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #4f46e5 100%); padding: 2rem 2.5rem; border-radius: 18px; margin-bottom: 2rem; box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.12), 0 8px 10px -6px rgba(59, 130, 246, 0.12);">
+        <h1 style="color: white; margin: 0; font-size: 2.2rem; font-weight: 800; letter-spacing: -0.025em; line-height: 1.2; font-family: 'Inter', sans-serif;">馃 H1 Joint Control & Diagnostics Dashboard</h1>
+        <p style="color: rgba(255, 255, 255, 0.85); margin: 0.6rem 0 0 0; font-size: 1.05rem; font-weight: 400; font-family: 'Inter', sans-serif;">Advanced real-time visualization and performance validation for EID & PD controllers</p>
+    </div>
+    """, unsafe_allow_html=True)
+
     # Sidebar
     with st.sidebar:
-        st.markdown("## 馃 H1 Control DB")
+        st.markdown("## 棣冾樆 H1 Control DB")
 
         db_path = st.text_input("Database", str(DEFAULT_DB), key="db_path")
 
@@ -893,7 +1183,7 @@ def main() -> None:
         # Quick stats
         stats = _query("""
             SELECT (SELECT COUNT(*) FROM experiments) AS n_exps,
-                   (SELECT COUNT(*) FROM comparison_results) AS n_comps
+                   (SELECT COUNT(*) FROM comparison_pairs) AS n_comps
         """, db_path=db_path)
         if not stats.empty:
             s = stats.iloc[0]
@@ -903,7 +1193,7 @@ def main() -> None:
         st.divider()
 
         # Quick reimport
-        if st.button("馃攧 Re-import all runs", use_container_width=True):
+        if st.button("棣冩敡 Re-import all runs", use_container_width=True):
             import subprocess, sys
             result = subprocess.run(
                 [sys.executable, str(REPO_ROOT / "scripts" / "db_manager.py"), "rebuild",
@@ -911,7 +1201,7 @@ def main() -> None:
                 capture_output=True, text=True, timeout=60,
             )
             if result.returncode == 0:
-                st.success("Done 鈥?refresh the page")
+                st.success("Done 閳?refresh the page")
                 _query.clear()
                 load_exps.clear()
                 load_comps.clear()
@@ -919,8 +1209,8 @@ def main() -> None:
                 st.error(result.stderr[-300:] if result.stderr else "Unknown error")
 
     # Main tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Overview", "Joint Analysis", "Timeseries", "SQL",
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "Overview", "Joint Analysis", "Control Metrics", "Sine Tracking", "Timeseries", "SQL",
     ])
 
     with tab1:
@@ -928,8 +1218,12 @@ def main() -> None:
     with tab2:
         page_joint_analysis(db_path)
     with tab3:
-        page_timeseries(db_path)
+        page_control_metrics(db_path)
     with tab4:
+        page_sine_tracking(db_path)
+    with tab5:
+        page_timeseries(db_path)
+    with tab6:
         c1, c2 = st.tabs(["SQL Console", "Config Inspector"])
         with c1:
             page_query(db_path)

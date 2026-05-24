@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(unitree_h1_direct_interface LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -9,10 +9,18 @@ option(H1IF_BUILD_UNITREE "Build the Unitree SDK2 runtime target" OFF)
 
 find_package(Threads REQUIRED)
 
+set(BUILD_EXAMPLES OFF CACHE BOOL "Build Ruckig examples" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "Build Ruckig tests" FORCE)
+set(BUILD_CLOUD_CLIENT OFF CACHE BOOL "Build Ruckig cloud client" FORCE)
+set(BUILD_PYTHON_MODULE OFF CACHE BOOL "Build Ruckig Python wrapper" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+add_subdirectory(third_party/ruckig EXCLUDE_FROM_ALL)
+
 add_library(h1if_core INTERFACE)
 target_include_directories(h1if_core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+target_link_libraries(h1if_core INTERFACE ruckig::ruckig)
 
 add_executable(h1_mock_closed_loop
     src/mock_closed_loop.cpp

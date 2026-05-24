@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+<rect width="100%" height="100%" fill="white"/>
+<style>
+    text { font-family: Arial, Helvetica, sans-serif; fill: #111827; }
+    .title { font-size: 22px; font-weight: 700; }
+    .axis { stroke: #1f2937; stroke-width: 1.1; }
+    .grid { stroke: #e5e7eb; stroke-width: 1; }
+    .tick { font-size: 12px; fill: #374151; }
+    .label { font-size: 14px; font-weight: 600; }
+    .legend { font-size: 13px; }
+  </style>
+<text x="86" y="36" class="title">Reference Smoothness Metrics</text>
+<line x1="86" y1="408.00" x2="950" y2="408.00" class="grid"/>
+<text x="76" y="412.00" text-anchor="end" class="tick">0.00</text>
+<line x1="86" y1="340.40" x2="950" y2="340.40" class="grid"/>
+<text x="76" y="344.40" text-anchor="end" class="tick">0.17</text>
+<line x1="86" y1="272.80" x2="950" y2="272.80" class="grid"/>
+<text x="76" y="276.80" text-anchor="end" class="tick">0.34</text>
+<line x1="86" y1="205.20" x2="950" y2="205.20" class="grid"/>
+<text x="76" y="209.20" text-anchor="end" class="tick">0.50</text>
+<line x1="86" y1="137.60" x2="950" y2="137.60" class="grid"/>
+<text x="76" y="141.60" text-anchor="end" class="tick">0.67</text>
+<line x1="86" y1="70.00" x2="950" y2="70.00" class="grid"/>
+<text x="76" y="74.00" text-anchor="end" class="tick">0.84</text>
+<line x1="86" y1="408" x2="950" y2="408" class="axis"/>
+<line x1="86" y1="70" x2="86" y2="408" class="axis"/>
+<text transform="translate(24 239) rotate(-90)" text-anchor="middle" class="label">Metric value</text>
+<rect x="86.00" y="384.22" width="83.78" height="23.78" fill="#1f77b4"/>
+<text x="127.89" y="379.22" text-anchor="middle" class="tick">0.059</text>
+<rect x="176.78" y="384.08" width="83.78" height="23.92" fill="#d62728"/>
+<text x="218.67" y="379.08" text-anchor="middle" class="tick">0.059</text>
+<rect x="267.56" y="381.64" width="83.78" height="26.36" fill="#2ca02c"/>
+<text x="309.44" y="376.64" text-anchor="middle" class="tick">0.066</text>
+<text x="218.67" y="444" text-anchor="middle" class="label">max |dq_ref|</text>
+<rect x="385.33" y="345.83" width="83.78" height="62.17" fill="#1f77b4"/>
+<text x="427.22" y="340.83" text-anchor="middle" class="tick">0.155</text>
+<rect x="476.11" y="121.56" width="83.78" height="286.44" fill="#d62728"/>
+<text x="518.00" y="116.56" text-anchor="middle" class="tick">0.712</text>
+<rect x="566.89" y="147.76" width="83.78" height="260.24" fill="#2ca02c"/>
+<text x="608.78" y="142.76" text-anchor="middle" class="tick">0.647</text>
+<text x="518.00" y="444" text-anchor="middle" class="label">max |ddq_ref|</text>
+<rect x="684.67" y="392.83" width="83.78" height="15.17" fill="#1f77b4"/>
+<text x="726.56" y="387.83" text-anchor="middle" class="tick">0.038</text>
+<rect x="775.44" y="392.35" width="83.78" height="15.65" fill="#d62728"/>
+<text x="817.33" y="387.35" text-anchor="middle" class="tick">0.039</text>
+<rect x="866.22" y="391.73" width="83.78" height="16.27" fill="#2ca02c"/>
+<text x="908.11" y="386.73" text-anchor="middle" class="tick">0.040</text>
+<text x="817.33" y="444" text-anchor="middle" class="label">dq_ref RMS</text>
+<rect x="86" y="478" width="16" height="16" fill="#1f77b4"/>
+<text x="109" y="491" class="legend">Open-loop quintic</text>
+<rect x="346" y="478" width="16" height="16" fill="#d62728"/>
+<text x="369" y="491" class="legend">Ruckig</text>
+<rect x="606" y="478" width="16" height="16" fill="#2ca02c"/>
+<text x="629" y="491" class="legend">RL-smoothed quintic</text>
+</svg>
