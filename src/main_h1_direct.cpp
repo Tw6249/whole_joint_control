@@ -2,6 +2,7 @@
 #include "controller_factory.hpp"
 #include "runtime_config.hpp"
 #include "safety.hpp"
+#include "software_disturbance.hpp"
 
 #include <atomic>
 #include <array>
@@ -147,6 +148,7 @@ public:
 
         std::uint64_t cycle = 0;
         double last_t = nowSec();
+        const double run_start_t = last_t;
 
         while (g_running.load(std::memory_order_acquire)) {
             const auto loop_start = std::chrono::steady_clock::now();
@@ -157,6 +159,7 @@ public:
             h1if::RobotState state = readRobotState(cycle, actual_dt);
             h1if::RobotCommand command;
             h1if::ControllerDebug debug;
+            h1if::SoftwareDisturbanceTelemetry disturbance_telemetry;
 
             std::string trip_reason;
             if (checkMeasuredTrip(state, actual_dt, trip_reason)) {
@@ -167,13 +170,26 @@ public:
 
             if (state.state_valid) {
                 controller_->step(state, command, debug);
+                h1if::applySoftwareDisturbance(
+                    t - run_start_t,
+                    state,
+                    cfg_.software_disturbance,
+                    cfg_.safety,
+                    command,
+                    disturbance_telemetry);
             } else {
                 h1if::fillSafeHoldCommand(state, command, cfg_.safety);
+                h1if::initializeSoftwareDisturbanceTelemetry(
+                    state,
+                    command,
+                    cfg_.safety,
+                    disturbance_telemetry);
             }
             h1if::applySafety(state, command, debug, cfg_.safety);
+            h1if::finalizeSoftwareDisturbanceTelemetry(state, command, disturbance_telemetry);
 
             writeLowCmd(command);
-            pushLog(state, command, debug);
+            pushLog(state, command, debug, disturbance_telemetry);
 
             ++cycle;
             std::this_thread::sleep_until(
@@ -277,7 +293,10 @@ private:
         lowcmd_pub_->Write(low_cmd_);
     }
 
-    void pushLog(const h1if::RobotState& state, const h1if::RobotCommand& command, const h1if::ControllerDebug& debug) {
+    void pushLog(const h1if::RobotState& state,
+                 const h1if::RobotCommand& command,
+                 const h1if::ControllerDebug& debug,
+                 const h1if::SoftwareDisturbanceTelemetry& disturbance_telemetry) {
         for (int j : active_joints_) {
             h1if::LogSample sample;
             sample.cycle = state.cycle;
@@ -287,6 +306,12 @@ private:
             sample.joint_id = j;
             sample.measured = state.joint[j];
             sample.command = command.joint[j];
+            sample.tau_controller = disturbance_telemetry.tau_controller[j];
+            sample.tau_disturbance = disturbance_telemetry.tau_disturbance[j];
+            sample.tau_before_limit = disturbance_telemetry.tau_before_limit[j];
+            sample.tau_sent = disturbance_telemetry.tau_sent[j];
+            sample.tau_limit = disturbance_telemetry.tau_limit[j];
+            sample.saturation_flag = disturbance_telemetry.saturation_flag[j];
             sample.flags = debug.flags | debug.joint[j].flags;
             for (int i = 0; i < static_cast<int>(sample.debug.size()); ++i) {
                 sample.debug[i] = debug.joint[j].data[i];

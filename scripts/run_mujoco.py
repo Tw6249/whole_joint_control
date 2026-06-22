@@ -92,6 +92,17 @@ class JointReference:
     step_time_s: float
 
 
+@dataclass(frozen=True)
+class DisturbanceSpec:
+    enabled: bool = False
+    joints: tuple[int, ...] = ()
+    torques: tuple[float, ...] = ()
+    start_s: float = 0.0
+    end_s: float = 0.0
+    ramp_s: float = 0.0
+    waveform: str = "smooth_rect"
+
+
 def initial_reference_value(ref: JointReference) -> float:
     if ref.source == "step":
         return ref.center if ref.step_time_s > 0.0 else ref.center + ref.amplitude
@@ -131,6 +142,117 @@ def parse_float_list(value: str) -> list[float]:
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
     return [float(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def parse_bool(value: str) -> bool:
+    token = value.strip().lower().replace("-", "_")
+    if token in {"true", "1", "yes", "on"}:
+        return True
+    if token in {"false", "0", "no", "off"}:
+        return False
+    raise RuntimeError(f"invalid boolean value: {value}")
+
+
+def load_config_disturbance(config: Path) -> DisturbanceSpec:
+    section: str | None = None
+    values: dict[str, str] = {}
+    for raw_line in config.read_text(encoding="utf-8").splitlines():
+        raw_line = raw_line.split("#", 1)[0].rstrip()
+        if not raw_line.strip():
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        stripped = raw_line.strip()
+        if indent == 0:
+            section = stripped[:-1] if stripped.endswith(":") else None
+            continue
+        if section != "software_disturbance" or indent != 2:
+            continue
+        match = KEY_VALUE_RE.match(raw_line)
+        if match:
+            values[match.group(1)] = match.group(2).strip()
+
+    if not values:
+        return DisturbanceSpec()
+
+    start = values.get("start_s", values.get("start", "0.0"))
+    end = values.get("end_s", values.get("end", "0.0"))
+    ramp = values.get("ramp_s", values.get("ramp", values.get("ramp_time_s", "0.0")))
+    torques = values.get("torques", values.get("torque", values.get("amplitudes", "")))
+    return DisturbanceSpec(
+        enabled=parse_bool(values.get("enabled", "false")),
+        joints=tuple(parse_int_list(values.get("joints", ""))),
+        torques=tuple(parse_float_list(torques)),
+        start_s=float(start),
+        end_s=float(end),
+        ramp_s=float(ramp),
+        waveform=values.get("waveform", "smooth_rect").strip().lower().replace("-", "_"),
+    )
+
+
+def resolve_disturbance_spec(args: argparse.Namespace) -> DisturbanceSpec:
+    spec = load_config_disturbance(args.config)
+    cli_joints = parse_int_list(args.disturbance_joints)
+    cli_torques = parse_float_list(args.disturbance_torques)
+    if cli_joints or cli_torques:
+        spec = DisturbanceSpec(
+            enabled=True,
+            joints=tuple(cli_joints),
+            torques=tuple(cli_torques),
+            start_s=spec.start_s,
+            end_s=spec.end_s,
+            ramp_s=spec.ramp_s,
+            waveform=spec.waveform,
+        )
+    if args.disturbance_start is not None:
+        spec = DisturbanceSpec(
+            spec.enabled, spec.joints, spec.torques,
+            float(args.disturbance_start), spec.end_s, spec.ramp_s, spec.waveform)
+    if args.disturbance_end is not None:
+        spec = DisturbanceSpec(
+            spec.enabled, spec.joints, spec.torques,
+            spec.start_s, float(args.disturbance_end), spec.ramp_s, spec.waveform)
+    if args.disturbance_ramp is not None:
+        spec = DisturbanceSpec(
+            spec.enabled, spec.joints, spec.torques,
+            spec.start_s, spec.end_s, float(args.disturbance_ramp), spec.waveform)
+    if args.disturbance_waveform is not None:
+        spec = DisturbanceSpec(
+            spec.enabled, spec.joints, spec.torques,
+            spec.start_s, spec.end_s, spec.ramp_s,
+            args.disturbance_waveform.strip().lower().replace("-", "_"))
+
+    if spec.enabled:
+        if not spec.joints:
+            raise RuntimeError("software disturbance enabled requires at least one joint")
+        if len(spec.joints) != len(spec.torques):
+            raise RuntimeError("software disturbance joints and torques must have the same length")
+        if spec.end_s <= spec.start_s:
+            raise RuntimeError("software disturbance requires start_s < end_s")
+        if spec.ramp_s < 0.0:
+            raise RuntimeError("software disturbance ramp_s must be >= 0")
+        if spec.waveform not in {"rect", "rectangle", "rectangular", "step",
+                                 "smooth_rect", "smooth_rectangle",
+                                 "half_cosine", "cosine"}:
+            raise RuntimeError("software disturbance waveform must be rectangular or smooth_rect")
+    return spec
+
+
+def disturbance_window(t: float, spec: DisturbanceSpec) -> float:
+    if not spec.enabled or spec.end_s <= spec.start_s or t < spec.start_s or t > spec.end_s:
+        return 0.0
+    if spec.waveform in {"rect", "rectangle", "rectangular", "step"} or spec.ramp_s <= 0.0:
+        return 1.0
+    duration = spec.end_s - spec.start_s
+    ramp = min(spec.ramp_s, 0.5 * duration)
+    if ramp <= 0.0:
+        return 1.0
+    if t < spec.start_s + ramp:
+        s = clamp((t - spec.start_s) / ramp, 0.0, 1.0)
+        return 0.5 * (1.0 - math.cos(math.pi * s))
+    if t > spec.end_s - ramp:
+        s = clamp((spec.end_s - t) / ramp, 0.0, 1.0)
+        return 0.5 * (1.0 - math.cos(math.pi * s))
+    return 1.0
 
 
 def load_controller_references(config: Path) -> dict[int, JointReference]:
@@ -182,7 +304,7 @@ def load_controller_references(config: Path) -> dict[int, JointReference]:
                 current_group["joints"] = parse_int_list(raw_value)
             elif key in {
                 "policy_source", "policy_center", "policy_amplitude",
-                "policy_phase_rad", "policy_step_time_s",
+                "policy_phase_rad", "policy_step_time_s", "enabled",
             }:
                 current_group_values = current_group["values"]
                 assert isinstance(current_group_values, dict)
@@ -198,7 +320,7 @@ def load_controller_references(config: Path) -> dict[int, JointReference]:
             continue
         if match and match.group(1) in {
             "policy_source", "policy_center", "policy_amplitude",
-            "policy_phase_rad", "policy_step_time_s",
+            "policy_phase_rad", "policy_step_time_s", "enabled",
         }:
             values[current_joint][match.group(1)] = match.group(2).strip()
 
@@ -212,6 +334,8 @@ def load_controller_references(config: Path) -> dict[int, JointReference]:
                 if isinstance(group_values, dict):
                     item.update(group_values)
         item.update(values[joint_id])
+        if not parse_bool(item.get("enabled", "true")):
+            continue
         required = {"policy_center", "policy_amplitude"}
         missing = sorted(required - set(item))
         if missing:
@@ -396,18 +520,22 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
     joint_abs_err_max: dict[int, float] = defaultdict(float)
     joint_tau_sum: dict[int, float] = defaultdict(float)
     steps = int(round(args.duration / args.dt))
-    log_interval = max(1, int(round(0.02 / args.dt)))  # log at 50 Hz
-    disturbance_joints = parse_int_list(args.disturbance_joints)
-    disturbance_torques = parse_float_list(args.disturbance_torques)
-    if disturbance_torques and len(disturbance_torques) != len(disturbance_joints):
-        raise RuntimeError("--disturbance-torques must have the same length as --disturbance-joints")
-    disturbance_by_joint = dict(zip(disturbance_joints, disturbance_torques))
+    if args.log_every_step:
+        log_interval = 1
+    else:
+        log_interval = max(1, int(round(1.0 / max(args.log_hz, 1.0e-9) / args.dt)))
+    disturbance = resolve_disturbance_spec(args)
+    disturbance_by_joint = dict(zip(disturbance.joints, disturbance.torques))
 
     # Build CSV columns: cycle, t, joint_id, plus motor commands + all debug slots
     motor_cols = ["motor_q", "motor_dq", "motor_tau", "motor_kp", "motor_kd"]
+    torque_cols = [
+        "tau_controller", "tau_disturbance", "tau_before_limit",
+        "tau_sent", "tau_limit", "saturation_flag",
+    ]
     debug_names = EID_DEBUG_NAMES if controller_kind == "eid" else PD_DEBUG_NAMES
     debug_cols = [debug_names.get(i, f"debug_{i}") for i in range(N_DEBUG_SLOTS)]
-    csv_columns = ["cycle", "t", "joint_id"] + motor_cols + debug_cols + ["flags", "joint_flags"]
+    csv_columns = ["cycle", "t", "joint_id"] + motor_cols + torque_cols + debug_cols + ["flags", "joint_flags"]
 
     try:
         with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -415,6 +543,7 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
             writer.writeheader()
             for step in range(steps):
                 t = step * args.dt
+                window = disturbance_window(t, disturbance)
                 fix_suspended_base(data, args.height_m)
                 command = send_state(proc, step, t, args.dt, data, info)
                 combined_flags |= command["flags"]
@@ -424,12 +553,17 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                     ji = info[joint_id]
                     q = float(data.qpos[ji.qposadr])
                     dq = float(data.qvel[ji.dofadr])
-                    tau_applied = (
+                    tau_controller = (
                         float(command["kp"][joint_id]) * (float(command["q_cmd"][joint_id]) - q)
                         + float(command["kd"][joint_id]) * (float(command["dq_cmd"][joint_id]) - dq)
                         + float(command["tau"][joint_id])
                     )
-                    data.ctrl[joint_id] = tau_applied
+                    tau_disturbance = disturbance_by_joint.get(joint_id, 0.0) * window
+                    tau_before_limit = tau_controller + tau_disturbance
+                    tau_limit = min(abs(float(ji.ctrl_min)), abs(float(ji.ctrl_max)))
+                    tau_sent = clamp(tau_before_limit, -tau_limit, tau_limit) if tau_limit > 0.0 else 0.0
+                    saturation_flag = int(abs(tau_sent - tau_before_limit) > 1.0e-9)
+                    data.ctrl[joint_id] = tau_sent
 
                     # Use debug slot 0 (shaped q_ref) as reference for summary tracking
                     q_ref = float(command["debug_slots"][0][joint_id])
@@ -441,8 +575,8 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                     joint_q_sse[joint_id] += q_error * q_error
                     joint_q_count[joint_id] += 1
                     joint_abs_err_max[joint_id] = max(joint_abs_err_max[joint_id], abs(q_error))
-                    joint_max_abs_tau[joint_id] = max(joint_max_abs_tau[joint_id], abs(tau_applied))
-                    joint_tau_sum[joint_id] += abs(tau_applied)
+                    joint_max_abs_tau[joint_id] = max(joint_max_abs_tau[joint_id], abs(tau_sent))
+                    joint_tau_sum[joint_id] += abs(tau_sent)
 
                     if step % log_interval == 0:
                         row = {
@@ -452,6 +586,12 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                             "motor_tau": f"{command['tau'][joint_id]:.12g}",
                             "motor_kp": f"{command['kp'][joint_id]:.12g}",
                             "motor_kd": f"{command['kd'][joint_id]:.12g}",
+                            "tau_controller": f"{tau_controller:.12g}",
+                            "tau_disturbance": f"{tau_disturbance:.12g}",
+                            "tau_before_limit": f"{tau_before_limit:.12g}",
+                            "tau_sent": f"{tau_sent:.12g}",
+                            "tau_limit": f"{tau_limit:.12g}",
+                            "saturation_flag": str(saturation_flag),
                             "flags": str(command["flags"]),
                             "joint_flags": str(command["joint_flags"][joint_id]),
                         }
@@ -459,11 +599,6 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                             col_name = debug_names.get(slot_idx, f"debug_{slot_idx}")
                             row[col_name] = f"{command['debug_slots'][slot_idx][joint_id]:.12g}"
                         writer.writerow(row)
-
-                if disturbance_by_joint and args.disturbance_start <= t <= args.disturbance_end:
-                    for joint_id, tau_disturbance in disturbance_by_joint.items():
-                        if joint_id in info and 0 <= joint_id < len(data.ctrl):
-                            data.ctrl[joint_id] += tau_disturbance
 
                 mujoco.mj_step(model, data)
                 fix_suspended_base(data, args.height_m)
@@ -497,10 +632,14 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
             f"csv={csv_path}",
             f"duration={args.duration}",
             f"dt={args.dt}",
+            f"log_hz={'every_step' if args.log_every_step else args.log_hz}",
             f"active_joints={','.join(str(j) for j in active_joints)}",
-            f"disturbance_joints={','.join(str(j) for j in disturbance_joints)}",
-            f"disturbance_torques={','.join(str(v) for v in disturbance_torques)}",
-            f"disturbance_window={args.disturbance_start},{args.disturbance_end}",
+            f"disturbance_enabled={disturbance.enabled}",
+            f"disturbance_joints={','.join(str(j) for j in disturbance.joints)}",
+            f"disturbance_torques={','.join(str(v) for v in disturbance.torques)}",
+            f"disturbance_window={disturbance.start_s},{disturbance.end_s}",
+            f"disturbance_ramp={disturbance.ramp_s}",
+            f"disturbance_waveform={disturbance.waveform}",
             f"q_rmse={q_rmse}",
             f"combined_flags={combined_flags}",
             f"fatal_flags={fatal_flags}",
@@ -525,14 +664,22 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=15.0)
     parser.add_argument("--dt", type=float, default=0.002)
     parser.add_argument("--height-m", type=float, default=1.35)
+    parser.add_argument("--log-hz", type=float, default=50.0,
+                        help="CSV logging frequency. Use 500 for raw control-rate diagnostics.")
+    parser.add_argument("--log-every-step", action="store_true",
+                        help="Write one CSV row per control step.")
     parser.add_argument("--disturbance-joints", default="",
                         help="Comma-separated MuJoCo actuator ids to receive external torque.")
     parser.add_argument("--disturbance-torques", default="",
                         help="Comma-separated external torques [Nm], aligned with --disturbance-joints.")
-    parser.add_argument("--disturbance-start", type=float, default=0.0,
+    parser.add_argument("--disturbance-start", type=float, default=None,
                         help="Start time for external disturbance torque.")
-    parser.add_argument("--disturbance-end", type=float, default=0.0,
+    parser.add_argument("--disturbance-end", type=float, default=None,
                         help="End time for external disturbance torque.")
+    parser.add_argument("--disturbance-ramp", type=float, default=None,
+                        help="Half-cosine ramp time for smooth rectangular disturbance.")
+    parser.add_argument("--disturbance-waveform", default=None,
+                        help="Disturbance waveform: smooth_rect or rectangular.")
     parser.add_argument("--export-summary", action="store_true",
                         help="Export per-joint summary CSV.")
     args = parser.parse_args()

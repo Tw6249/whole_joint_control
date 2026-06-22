@@ -109,6 +109,8 @@ def load_joint_log(path: Path) -> pd.DataFrame:
 
 
 def applied_tau(df: pd.DataFrame) -> np.ndarray:
+    if "tau_sent" in df.columns:
+        return df["tau_sent"].to_numpy()
     return (
         df["motor_kp"].to_numpy() * (df["motor_q"].to_numpy() - df["q_actual"].to_numpy())
         + df["motor_kd"].to_numpy() * (df["motor_dq"].to_numpy() - df["dq_actual"].to_numpy())

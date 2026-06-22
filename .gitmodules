@@ -1,3 +1,6 @@
 [submodule "third_party/ruckig"]
 	path = third_party/ruckig
 	url = https://github.com/pantor/ruckig.git
+[submodule "unitree_rl_gym"]
+	path = unitree_rl_gym
+	url = https://github.com/unitreerobotics/unitree_rl_gym.git

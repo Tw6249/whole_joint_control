@@ -2,6 +2,7 @@
 
 #include "reference_trajectory.hpp"
 #include "safety.hpp"
+#include "software_disturbance.hpp"
 
 #include <algorithm>
 #include <array>
@@ -86,6 +87,7 @@ struct RuntimeConfig {
     double mock_duration = 5.0;
     SafetyConfig safety;
     ControllerRuntimeConfig controller;
+    SoftwareDisturbanceConfig software_disturbance;
     std::string log_path = "data/h1_mock_log.csv";
 };
 
@@ -149,6 +151,24 @@ inline std::vector<int> parseIntList(std::string value) {
         item = trim(item);
         if (!item.empty()) {
             result.push_back(toInt(item));
+        }
+    }
+    return result;
+}
+
+inline std::vector<double> parseDoubleList(std::string value) {
+    value = trim(value);
+    if (value.size() >= 2 && value.front() == '[' && value.back() == ']') {
+        value = value.substr(1, value.size() - 2);
+    }
+
+    std::vector<double> result;
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item = trim(item);
+        if (!item.empty()) {
+            result.push_back(toDouble(item));
         }
     }
     return result;
@@ -230,6 +250,18 @@ inline PolicySource parsePolicySource(const std::string& value) {
     throw std::runtime_error("policy_source must be hold, sine, or step");
 }
 
+inline SoftwareDisturbanceWaveform parseSoftwareDisturbanceWaveform(const std::string& value) {
+    const std::string token = normalizeToken(trim(value));
+    if (token == "rect" || token == "rectangle" || token == "rectangular" || token == "step") {
+        return SoftwareDisturbanceWaveform::Rectangular;
+    }
+    if (token == "smooth_rect" || token == "smooth_rectangle" ||
+        token == "half_cosine" || token == "cosine") {
+        return SoftwareDisturbanceWaveform::SmoothRect;
+    }
+    throw std::runtime_error("software_disturbance.waveform must be rectangular or smooth_rect");
+}
+
 inline void parseControllerParamField(ControllerParams& cfg,
                                       const std::string& key,
                                       const std::string& value) {
@@ -280,6 +312,18 @@ inline void parseControllerParamField(ControllerParams& cfg,
     else if (key == "torque_safe_kd") cfg.torque_safe_kd = toDouble(value);
     else if (key == "inverse_q_weight") cfg.inverse_q_weight = toDouble(value);
     else if (key == "inverse_dq_weight") cfg.inverse_dq_weight = toDouble(value);
+}
+
+inline void parseSoftwareDisturbanceField(SoftwareDisturbanceConfig& cfg,
+                                          const std::string& key,
+                                          const std::string& value) {
+    if (key == "enabled") cfg.enabled = toBool(value);
+    else if (key == "joints") cfg.joints = parseIntList(value);
+    else if (key == "torques" || key == "torque" || key == "amplitudes") cfg.torques = parseDoubleList(value);
+    else if (key == "start_s" || key == "start") cfg.start_s = toDouble(value);
+    else if (key == "end_s" || key == "end") cfg.end_s = toDouble(value);
+    else if (key == "ramp_s" || key == "ramp" || key == "ramp_time_s") cfg.ramp_s = toDouble(value);
+    else if (key == "waveform") cfg.waveform = parseSoftwareDisturbanceWaveform(value);
 }
 
 inline void parsePlantField(PlantModelConfig& plant,
@@ -432,6 +476,29 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
         throw std::runtime_error("control_dt must be positive and finite");
     }
 
+    if (cfg.software_disturbance.enabled) {
+        const auto& d = cfg.software_disturbance;
+        if (d.joints.empty()) {
+            throw std::runtime_error("software_disturbance.enabled requires at least one joint");
+        }
+        if (d.joints.size() != d.torques.size()) {
+            throw std::runtime_error("software_disturbance.joints and torques must have the same length");
+        }
+        if (d.end_s <= d.start_s || d.ramp_s < 0.0 ||
+            !finite(d.start_s) || !finite(d.end_s) || !finite(d.ramp_s)) {
+            throw std::runtime_error("software_disturbance requires finite start_s < end_s and ramp_s >= 0");
+        }
+        for (std::size_t i = 0; i < d.joints.size(); ++i) {
+            const int joint_id = d.joints[i];
+            if (joint_id < 0 || joint_id >= kMaxMotors) {
+                throw std::runtime_error("software_disturbance.joints contains out-of-range joint id");
+            }
+            if (!finite(d.torques[i])) {
+                throw std::runtime_error("software_disturbance.torques contains non-finite value");
+            }
+        }
+    }
+
     for (int i = 0; i < kMaxMotors; ++i) {
         const auto& lim = cfg.safety.limit[i];
         if (!std::isfinite(lim.q_min) || !std::isfinite(lim.q_max) ||
@@ -577,6 +644,10 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             else if (key == "measured_speed_trip") cfg.safety.measured_speed_trip = toDouble(value);
             else if (key == "measured_jump_trip") cfg.safety.measured_jump_trip = toDouble(value);
             else if (key == "max_control_dt") cfg.safety.max_control_dt = toDouble(value);
+        } else if (section == "software_disturbance") {
+            if (indent == 2) {
+                parseSoftwareDisturbanceField(cfg.software_disturbance, key, value);
+            }
         } else if (section == "controller") {
             if (indent == 2) {
                 current_controller_joint = -1;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "controller_interface.hpp"
-
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -21,6 +20,12 @@ struct LogSample {
     int joint_id = 0;
     JointState measured;
     JointCommand command;
+    double tau_controller = 0.0;
+    double tau_disturbance = 0.0;
+    double tau_before_limit = 0.0;
+    double tau_sent = 0.0;
+    double tau_limit = 0.0;
+    std::uint8_t saturation_flag = 0;
     std::array<double, kJointDebugSize> debug{};
     std::uint32_t flags = 0;
 };
@@ -114,7 +119,9 @@ private:
 
     void writeHeader() {
         out_ << "cycle,t,dt,lowstate_age,joint_id,q,dq,tau_est,"
-             << "q_cmd,dq_cmd,kp_cmd,kd_cmd,tau_cmd,flags";
+             << "q_cmd,dq_cmd,kp_cmd,kd_cmd,tau_cmd,"
+             << "tau_controller,tau_disturbance,tau_before_limit,tau_sent,tau_limit,saturation_flag,"
+             << "flags";
         for (int i = 0; i < static_cast<int>(LogSample{}.debug.size()); ++i) {
             out_ << ",debug_" << i;
         }
@@ -135,6 +142,12 @@ private:
              << s.command.kp << ','
              << s.command.kd << ','
              << s.command.tau << ','
+             << s.tau_controller << ','
+             << s.tau_disturbance << ','
+             << s.tau_before_limit << ','
+             << s.tau_sent << ','
+             << s.tau_limit << ','
+             << static_cast<int>(s.saturation_flag) << ','
              << s.flags;
         for (double value : s.debug) {
             out_ << ',' << value;

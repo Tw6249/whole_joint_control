@@ -229,6 +229,15 @@ control_dt: 0.002
 mock_duration: 0.02
 log_path: data/test_multi.csv
 
+software_disturbance:
+  enabled: true
+  joints: [2, 5]
+  torques: [1.2, -0.8]
+  start_s: 0.2
+  end_s: 0.6
+  ramp_s: 0.1
+  waveform: smooth_rect
+
 safe_hold:
   kp: 10.0
   kd: 1.0
@@ -387,6 +396,20 @@ joint_limits:
     assert(runtime_cfg.controller.joints[5]->controller.inverse_q_weight == 0.05);
     assert(runtime_cfg.controller.joints[5]->controller.inverse_dq_weight == 0.06);
     assert(runtime_cfg.controller.joints[5]->controller.policy_source == h1if::PolicySource::Sine);
+    assert(runtime_cfg.software_disturbance.enabled);
+    assert(runtime_cfg.software_disturbance.joints.size() == 2);
+    assert(runtime_cfg.software_disturbance.joints[0] == 2);
+    assert(runtime_cfg.software_disturbance.torques[0] == 1.2);
+    assert(runtime_cfg.software_disturbance.waveform == h1if::SoftwareDisturbanceWaveform::SmoothRect);
+
+    {
+        const auto& d = runtime_cfg.software_disturbance;
+        assert(h1if::softwareDisturbanceWindow(0.19, d) == 0.0);
+        assert(h1if::softwareDisturbanceWindow(0.20, d) == 0.0);
+        assert(h1if::softwareDisturbanceWindow(0.25, d) > 0.0);
+        assert(h1if::softwareDisturbanceWindow(0.35, d) == 1.0);
+        assert(h1if::softwareDisturbanceWindow(0.60, d) == 0.0);
+    }
 
     {
         auto state = validState();
@@ -406,6 +429,34 @@ joint_limits:
         assert(cmd.joint[4].tau == 0.0f);
         assert(cmd.joint[4].q == static_cast<float>(state.joint[4].q));
         assert(debug.joint[2].data[0] != debug.joint[5].data[0]);
+    }
+
+    {
+        auto state = validState();
+        state.state_valid = true;
+        state.joint[2].q = 0.5;
+        h1if::RobotCommand cmd;
+        h1if::fillSafeHoldCommand(state, cmd, runtime_cfg.safety);
+        cmd.joint[2].q = static_cast<float>(state.joint[2].q);
+        cmd.joint[2].dq = 0.0f;
+        cmd.joint[2].kp = 0.0f;
+        cmd.joint[2].kd = 0.0f;
+        cmd.joint[2].tau = 7.5f;
+
+        h1if::SoftwareDisturbanceConfig d;
+        d.enabled = true;
+        d.joints = {2};
+        d.torques = {2.0};
+        d.start_s = 0.0;
+        d.end_s = 1.0;
+        d.ramp_s = 0.0;
+        h1if::SoftwareDisturbanceTelemetry tel;
+        h1if::applySoftwareDisturbance(0.5, state, d, runtime_cfg.safety, cmd, tel);
+        assert(std::abs(tel.tau_controller[2] - 7.5) < 1.0e-9);
+        assert(std::abs(tel.tau_disturbance[2] - 2.0) < 1.0e-9);
+        assert(std::abs(tel.tau_before_limit[2] - 9.5) < 1.0e-9);
+        assert(std::abs(tel.tau_sent[2] - 8.0) < 1.0e-9);
+        assert(tel.saturation_flag[2] == 1);
     }
 
     const std::string position_pd_config = R"YAML(

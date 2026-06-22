@@ -77,6 +77,33 @@ python scripts/run_mujoco.py \
 
 Python 只做 MuJoCo 物理、stepper 通信和输出。控制算法由 C++ stepper 执行，YAML 中 `controller.kind` 选择控制器。
 
+软件等效输入扰动可以直接在 MuJoCo 后端注入，并记录实验计划需要的力矩字段：
+
+```powershell
+python scripts/run_mujoco.py `
+    --config config/h1_hip_knee_dual_tuned.yaml `
+    --duration 8.0 --log-hz 500 `
+    --disturbance-joints 1 `
+    --disturbance-torques 18 `
+    --disturbance-start 2.5 --disturbance-end 3.0 `
+    --disturbance-ramp 0.1 --disturbance-waveform smooth_rect
+```
+
+也可以在 YAML 顶层写入同一套配置，实机入口 `h1_direct` 会使用相同字段：
+
+```yaml
+software_disturbance:
+  enabled: true
+  joints: [1]
+  torques: [18.0]
+  start_s: 2.5
+  end_s: 3.0
+  ramp_s: 0.1
+  waveform: smooth_rect
+```
+
+扰动日志字段包括 `tau_controller`、`tau_disturbance`、`tau_before_limit`、`tau_sent`、`tau_limit` 和 `saturation_flag`。
+
 输出（`--out-dir` 目录下）：
 - `mujoco_closed_loop_log.csv` — 逐帧日志
 - `summary.csv` — 每关节汇总指标
