@@ -96,13 +96,10 @@ int main() {
 
     assert(h1if::parsePolicyInterpolation("open_loop") == h1if::PolicyInterpolation::OpenLoop);
     assert(h1if::parsePolicyInterpolation("closed-loop") == h1if::PolicyInterpolation::ClosedLoop);
-    assert(h1if::parsePolicyInterpolation("ruckig") == h1if::PolicyInterpolation::Ruckig);
-    assert(h1if::parsePolicyInterpolation("rl_smoothed") == h1if::PolicyInterpolation::RlSmoothed);
+    assert(h1if::parsePolicyInterpolation("preview_mpc") == h1if::PolicyInterpolation::PreviewMpc);
     assert(h1if::parsePolicySource("hold") == h1if::PolicySource::Hold);
     assert(h1if::parsePolicySource("sine") == h1if::PolicySource::Sine);
     assert(h1if::parsePolicySource("step") == h1if::PolicySource::Step);
-    assert(h1if::parseRuckigTargetVelocity("policy") == h1if::RuckigTargetVelocity::Policy);
-    assert(h1if::parseRuckigTargetVelocity("zero") == h1if::RuckigTargetVelocity::Zero);
 
     {
         h1if::PolicyReferenceConfig step_cfg;
@@ -111,6 +108,7 @@ int main() {
         step_cfg.center = 0.5;
         step_cfg.amplitude = -0.2;
         step_cfg.step_time_s = 0.10;
+        step_cfg.reference_points = 1;
         h1if::PolicyReferenceInterpolator step_ref(step_cfg);
         const auto before = step_ref.sample(0.02, 0.002, 0.5, 0.0);
         const auto after = step_ref.sample(0.20, 0.002, 0.3, 0.0);
@@ -125,6 +123,7 @@ int main() {
         step_cfg.center = 0.5;
         step_cfg.amplitude = -0.2;
         step_cfg.step_time_s = 0.12;
+        step_cfg.reference_points = 1;
         h1if::PolicyReferenceInterpolator step_ref(step_cfg);
         const auto before = step_ref.sample(0.148, 0.002, 0.5, 0.0);
         const auto entering = step_ref.sample(0.152, 0.002, 0.5, 0.0);
@@ -165,6 +164,7 @@ int main() {
         cfg.center = 0.0;
         cfg.amplitude = 1.0;
         cfg.step_time_s = 0.0;
+        cfg.reference_points = 1;
         h1if::PolicyReferenceInterpolator ref(cfg);
         const auto first = ref.sample(0.051, 0.002, 0.2, 0.0);
         const auto same_segment = ref.sample(0.070, 0.002, 0.7, 0.0);
@@ -176,53 +176,49 @@ int main() {
 
     {
         h1if::PolicyReferenceConfig cfg;
-        cfg.interpolation = h1if::PolicyInterpolation::Ruckig;
-        cfg.source = h1if::PolicySource::Hold;
-        cfg.policy_dt = 0.02;
+        cfg.source = h1if::PolicySource::Sine;
+        cfg.policy_dt = 0.05;
         cfg.center = 0.5;
-        cfg.amplitude = 0.0;
-        cfg.max_velocity = 2.0;
-        cfg.max_acceleration = 100.0;
-        cfg.max_jerk = 10000.0;
-        h1if::PolicyReferenceInterpolator ref(cfg);
-        double q = 0.5;
-        double dq = 0.0;
-        for (int i = 0; i < 50; ++i) {
-            const auto sample = ref.sample(0.002 * i, 0.002, q, dq);
-            assert(std::isfinite(sample.now.q));
-            assert(std::isfinite(sample.now.dq));
-            assert(std::abs(sample.now.dq) <= cfg.max_velocity + 1.0e-9);
-            assert(std::isfinite(sample.next.q));
-            assert(std::isfinite(sample.next.dq));
-            q = sample.now.q;
-            dq = sample.now.dq;
-        }
+        cfg.amplitude = 0.1;
+        cfg.frequency_hz = 0.4;
+        cfg.phase_rad = -1.5707963267948966;
+
+        cfg.reference_points = 1;
+        h1if::PolicyReferenceInterpolator one_point(cfg);
+        const auto one = one_point.sample(0.05, 0.002, 0.5, 0.0);
+        assert(std::isfinite(one.now.dq));
+
+        cfg.reference_points = 2;
+        h1if::PolicyReferenceInterpolator two_point(cfg);
+        const auto two = two_point.sample(0.05, 0.002, 0.5, 0.0);
+        assert(std::isfinite(two.now.dq));
+
+        cfg.reference_points = 4;
+        h1if::PolicyReferenceInterpolator four_point(cfg);
+        const auto four = four_point.sample(0.05, 0.002, 0.5, 0.0);
+        assert(std::isfinite(four.now.dq));
+        assert(std::abs(one.now.dq - two.now.dq) > 1.0e-12);
+        assert(std::abs(two.now.dq - four.now.dq) > 1.0e-12);
     }
 
     {
         h1if::PolicyReferenceConfig cfg;
-        cfg.interpolation = h1if::PolicyInterpolation::RlSmoothed;
+        cfg.interpolation = h1if::PolicyInterpolation::PreviewMpc;
         cfg.source = h1if::PolicySource::Sine;
-        cfg.policy_dt = 0.02;
+        cfg.policy_dt = 0.05;
         cfg.center = 0.5;
-        cfg.amplitude = 0.01;
-        cfg.frequency_hz = 0.5;
-        cfg.max_velocity = 2.0;
-        cfg.max_acceleration = 20.0;
-        cfg.rl_velocity_alpha = 0.5;
-        cfg.rl_acceleration_alpha = 0.5;
-        cfg.rl_target_acceleration_blend = 0.5;
-        h1if::PolicyReferenceInterpolator ref(cfg);
-        double q = 0.5;
-        double dq = 0.0;
-        for (int i = 0; i < 50; ++i) {
-            const auto sample = ref.sample(0.002 * i, 0.002, q, dq);
-            assert(std::isfinite(sample.now.q));
-            assert(std::isfinite(sample.now.dq));
-            assert(std::abs(sample.now.dq) <= 0.5);
-            q = sample.now.q;
-            dq = sample.now.dq;
-        }
+        cfg.amplitude = 0.1;
+        cfg.frequency_hz = 0.4;
+        cfg.phase_rad = -1.5707963267948966;
+        cfg.reference_points = 2;
+        h1if::PolicyReferenceInterpolator preview_ref(cfg);
+        const auto first = preview_ref.sample(0.052, 0.002, 0.5, 0.0);
+        const auto later = preview_ref.sample(0.090, 0.002, 0.5, 0.0);
+        assert(std::isfinite(first.now.q));
+        assert(std::isfinite(first.now.dq));
+        assert(std::isfinite(later.now.q));
+        assert(std::isfinite(later.now.dq));
+        assert(std::abs(first.now.dq) > 1.0e-9 || std::abs(later.now.dq) > 1.0e-9);
     }
 
     const std::string valid_multi_config = R"YAML(
@@ -382,6 +378,7 @@ joint_limits:
     assert(runtime_cfg.controller.joints[2]->controller.inverse_dq_weight == 0.04);
     assert(runtime_cfg.controller.joints[2]->controller.policy_source == h1if::PolicySource::Step);
     assert(runtime_cfg.controller.joints[2]->controller.policy_step_time_s == 0.12);
+    assert(runtime_cfg.controller.joints[2]->controller.policy_reference_points == 4);
     assert(runtime_cfg.controller.joints[5]->controller.kp == 52.0);
     assert(runtime_cfg.controller.joints[5]->controller.kd == 7.5);
     assert(runtime_cfg.controller.joints[5]->controller.observer_gain_q == 0.41);
@@ -410,131 +407,6 @@ joint_limits:
         assert(cmd.joint[4].q == static_cast<float>(state.joint[4].q));
         assert(debug.joint[2].data[0] != debug.joint[5].data[0]);
     }
-
-    const std::string ruckig_config = R"YAML(
-robot: H1
-control_dt: 0.002
-controller:
-  kind: position_pd
-  defaults:
-    kp: 18.0
-    kd: 2.0
-    policy_interpolation: ruckig
-    policy_source: sine
-    policy_dt: 0.02
-    policy_center: 0.5
-    policy_amplitude: 0.02
-    policy_frequency_hz: 0.5
-    policy_max_acceleration: 100.0
-    policy_max_jerk: 10000.0
-  joints:
-    2:
-      name: RightKnee
-      enabled: true
-
-joint_limits:
-  2:
-    q_min: -0.26
-    q_max: 2.05
-    dq_max: 14.0
-    tau_max: 8.0
-    kp_max: 120.0
-    kd_max: 5.0
-)YAML";
-    const auto ruckig_path = writeTempConfig("h1if_ruckig.yaml", ruckig_config);
-    h1if::RuntimeConfig ruckig_cfg = h1if::loadRuntimeConfig(ruckig_path.string());
-    assert(ruckig_cfg.controller.joints[2]->controller.policy_interpolation == h1if::PolicyInterpolation::Ruckig);
-    assert(ruckig_cfg.controller.joints[2]->controller.policy_max_velocity == 14.0);
-    {
-        auto state = validState();
-        state.t = 0.0;
-        state.dt = ruckig_cfg.control_dt;
-        h1if::RobotCommand cmd;
-        h1if::ControllerDebug debug;
-        const auto controller = h1if::createController(ruckig_cfg);
-        controller->reset(state);
-        controller->step(state, cmd, debug);
-        h1if::applySafety(state, cmd, debug, ruckig_cfg.safety);
-
-        assert(std::isfinite(debug.joint[2].data[0]));
-        assert(std::isfinite(debug.joint[2].data[1]));
-        assert(std::abs(debug.joint[2].data[1]) <= 14.0 + 1.0e-9);
-    }
-
-    const auto invalid_ruckig_path = writeTempConfig("h1if_invalid_ruckig.yaml", R"YAML(
-robot: H1
-control_dt: 0.002
-controller:
-  kind: position_pd
-  defaults:
-    kp: 18.0
-    kd: 2.0
-    policy_interpolation: ruckig
-    policy_source: sine
-    policy_dt: 0.02
-    policy_center: 0.5
-    policy_amplitude: 0.02
-    policy_frequency_hz: 0.5
-    policy_max_acceleration: 0.0
-    policy_max_jerk: 400.0
-  joints:
-    2:
-      name: RightKnee
-      enabled: true
-
-joint_limits:
-  2:
-    q_min: -0.26
-    q_max: 2.05
-    dq_max: 14.0
-    tau_max: 8.0
-    kp_max: 120.0
-    kd_max: 5.0
-)YAML");
-    bool rejected_invalid_ruckig = false;
-    try {
-        (void)h1if::loadRuntimeConfig(invalid_ruckig_path.string());
-    } catch (const std::exception&) {
-        rejected_invalid_ruckig = true;
-    }
-    assert(rejected_invalid_ruckig);
-
-    const auto invalid_rl_smoothed_path = writeTempConfig("h1if_invalid_rl_smoothed.yaml", R"YAML(
-robot: H1
-control_dt: 0.002
-controller:
-  kind: position_pd
-  defaults:
-    kp: 18.0
-    kd: 2.0
-    policy_interpolation: rl_smoothed
-    policy_source: sine
-    policy_dt: 0.02
-    policy_center: 0.5
-    policy_amplitude: 0.02
-    policy_frequency_hz: 0.5
-    policy_max_acceleration: 0.0
-  joints:
-    2:
-      name: RightKnee
-      enabled: true
-
-joint_limits:
-  2:
-    q_min: -0.26
-    q_max: 2.05
-    dq_max: 14.0
-    tau_max: 8.0
-    kp_max: 120.0
-    kd_max: 5.0
-)YAML");
-    bool rejected_invalid_rl_smoothed = false;
-    try {
-        (void)h1if::loadRuntimeConfig(invalid_rl_smoothed_path.string());
-    } catch (const std::exception&) {
-        rejected_invalid_rl_smoothed = true;
-    }
-    assert(rejected_invalid_rl_smoothed);
 
     const std::string position_pd_config = R"YAML(
 robot: H1
@@ -566,6 +438,7 @@ joint_limits:
     const auto position_pd_path = writeTempConfig("h1if_position_pd.yaml", position_pd_config);
     h1if::RuntimeConfig pd_cfg = h1if::loadRuntimeConfig(position_pd_path.string());
     assert(pd_cfg.controller.kind == h1if::ControllerKind::PositionPd);
+    assert(pd_cfg.controller.joints[2]->controller.policy_reference_points == 4);
     {
         auto state = validState();
         state.t = 0.0;

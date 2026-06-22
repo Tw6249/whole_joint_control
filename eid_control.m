@@ -27,6 +27,7 @@ addpath(fullfile(packageDir, "mujoco_knee"));
 % Model workspace values from simulink_final.slx.
 eid_Ko = [0.9 0.0; 0.0 1.1];
 eid_Kpd = [260.0 18.0];
+eid_Ku = [260.0 18.0];
 eid_control_dt = 0.002;
 eid_eta_alpha = 0.9;
 eid_policy_reference_dt = 0.1;
@@ -119,10 +120,11 @@ for k = 1:nSamples
     x_hat = x_hat_mem;
     x_bar = x_hat + eta;
 
-    r_c_next = r_star_next - eta;
-    delta_r_c = r_c_next - r_star;
+    delta_r_c = r_star_next - r_star;
     u_star_k = analytic_inverse_model(r_star, delta_r_c, Ts);
-    r_d = r_star + K_dagger * u_star_k;
+    eta_u = eid_Ku * eta;
+    u_star_comp = u_star_k - eta_u;
+    r_d = r_star + K_dagger * u_star_comp;
 
     e = r_d - x_bar;
     u = eid_Kpd * e;
@@ -197,6 +199,7 @@ out.e_dq_t = timeseries(e_dq_t, t, "Name", "e_dq_t");
 out.params = struct( ...
     "eid_Ko", eid_Ko, ...
     "eid_Kpd", eid_Kpd, ...
+    "eid_Ku", eid_Ku, ...
     "eid_control_dt", eid_control_dt, ...
     "eid_eta_alpha", eid_eta_alpha, ...
     "eid_policy_reference_dt", eid_policy_reference_dt, ...
@@ -395,27 +398,15 @@ if modeId == 2.0
         tau = min((i - 1) * nodeDt, Tpolicy);
         [qNodes(i), dqNodes(i), ddqNodes(i)] = eval_quintic(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, Tpolicy, tau);
     end
-elseif modeId == 7.0
-    for i = 1:nNodes
-        tau = min((i - 1) * nodeDt, Tpolicy);
-        [qNodes(i), dqNodes(i), ddqNodes(i)] = eval_quintic_position_only(q0, dq0, ddq0, qTarget, Tpolicy, tau);
-    end
 elseif modeId == 3.0
     for i = 1:nNodes
         tau = min((i - 1) * nodeDt, Tpolicy);
         [qNodes(i), dqNodes(i), ddqNodes(i)] = eval_cubic(q0, dq0, qTarget, dqTarget, Tpolicy, tau);
     end
-elseif modeId == 8.0
-    for i = 1:nNodes
-        tau = min((i - 1) * nodeDt, Tpolicy);
-        [qNodes(i), dqNodes(i), ddqNodes(i)] = eval_cubic_position_only(q0, dq0, qTarget, Tpolicy, tau);
-    end
-elseif modeId == 5.0 || modeId == 9.0
-    useTerminalVelocity = modeId == 5.0;
-    [qNodes, dqNodes, ddqNodes] = build_scurve_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, nodeDt, Tpolicy, nNodes, MAX_NODES, useTerminalVelocity, vMax, aMax, jMax);
-elseif modeId == 6.0 || modeId == 10.0
-    useTerminalVelocity = modeId == 6.0;
-    [qNodes, dqNodes, ddqNodes] = build_mpc_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, nodeDt, nNodes, MAX_NODES, useTerminalVelocity, vMax, aMax, jMax);
+elseif modeId == 5.0
+    [qNodes, dqNodes, ddqNodes] = build_scurve_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, nodeDt, Tpolicy, nNodes, MAX_NODES, vMax, aMax, jMax);
+elseif modeId == 6.0
+    [qNodes, dqNodes, ddqNodes] = build_mpc_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, nodeDt, nNodes, MAX_NODES, vMax, aMax, jMax);
 elseif modeId == 4.0
     [qNodes, dqNodes, ddqNodes] = build_jerk_remaining_nodes(q0, dq0, ddq0, qTarget, dqTarget, nodeDt, nNodes, MAX_NODES, trackTime, velocityTrackTime, vMax, aMax, jMax);
 else
@@ -470,7 +461,7 @@ for i = 2:nNodes
 end
 end
 
-function [qNodes, dqNodes, ddqNodes] = build_scurve_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, Ts, Tpolicy, nNodes, MAX_NODES, useTerminalVelocity, vMax, aMax, jMax)
+function [qNodes, dqNodes, ddqNodes] = build_scurve_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, Ts, Tpolicy, nNodes, MAX_NODES, vMax, aMax, jMax)
 qNodes = zeros(MAX_NODES, 1);
 dqNodes = zeros(MAX_NODES, 1);
 ddqNodes = zeros(MAX_NODES, 1);
@@ -482,11 +473,7 @@ dqNodes(1) = dq;
 ddqNodes(1) = ddq;
 for i = 2:nNodes
     remaining = max(Tpolicy - (i - 2)*Ts, Ts);
-    if useTerminalVelocity
-        [~, ~, localDdq] = eval_quintic(q, dq, ddq, qTarget, dqTarget, ddqTarget, remaining, Ts);
-    else
-        [~, ~, localDdq] = eval_quintic_position_only(q, dq, ddq, qTarget, remaining, Ts);
-    end
+    [~, ~, localDdq] = eval_quintic(q, dq, ddq, qTarget, dqTarget, ddqTarget, remaining, Ts);
     jerk = clamp((localDdq - ddq) / Ts, -jMax, jMax);
     [q, dq, ddq] = integrate_one_step(q, dq, ddq, jerk, Ts, vMax, aMax);
     qNodes(i) = q;
@@ -495,7 +482,7 @@ for i = 2:nNodes
 end
 end
 
-function [qNodes, dqNodes, ddqNodes] = build_mpc_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, Ts, nNodes, MAX_NODES, useTerminalVelocity, vMax, aMax, jMax)
+function [qNodes, dqNodes, ddqNodes] = build_mpc_nodes(q0, dq0, ddq0, qTarget, dqTarget, ddqTarget, Ts, nNodes, MAX_NODES, vMax, aMax, jMax)
 MAX_HORIZON = 63;
 N = min(MAX_HORIZON, max(1, nNodes - 1));
 qBase = zeros(MAX_HORIZON, 1);
@@ -529,45 +516,29 @@ f = zeros(MAX_HORIZON, 1);
 for i = 1:N
     for j = 1:N
         H(i, j) = 2.0 * wj * double(i == j);
-        if useTerminalVelocity
-            H(i, j) = H(i, j) + 2.0 * ( ...
-                wTq * QJ(N, i) * QJ(N, j) + ...
-                wTdq * DqJ(N, i) * DqJ(N, j) + ...
-                wTddq * DdqJ(N, i) * DdqJ(N, j));
-        else
-            H(i, j) = H(i, j) + 2.0 * wTq * QJ(N, i) * QJ(N, j);
-        end
+        H(i, j) = H(i, j) + 2.0 * ( ...
+            wTq * QJ(N, i) * QJ(N, j) + ...
+            wTdq * DqJ(N, i) * DqJ(N, j) + ...
+            wTddq * DdqJ(N, i) * DdqJ(N, j));
         for k = 1:N
-            if useTerminalVelocity
-                H(i, j) = H(i, j) + 2.0 * ( ...
-                    wq * QJ(k, i) * QJ(k, j) + ...
-                    wdq * DqJ(k, i) * DqJ(k, j) + ...
-                    wddq * DdqJ(k, i) * DdqJ(k, j));
-            else
-                H(i, j) = H(i, j) + 2.0 * wq * QJ(k, i) * QJ(k, j);
-            end
+            H(i, j) = H(i, j) + 2.0 * ( ...
+                wq * QJ(k, i) * QJ(k, j) + ...
+                wdq * DqJ(k, i) * DqJ(k, j) + ...
+                wddq * DdqJ(k, i) * DdqJ(k, j));
         end
     end
 end
 
 for i = 1:N
-    if useTerminalVelocity
-        f(i) = f(i) + 2.0 * ( ...
-            wTq * QJ(N, i) * (qBase(N) - qTarget) + ...
-            wTdq * DqJ(N, i) * (dqBase(N) - dqTarget) + ...
-            wTddq * DdqJ(N, i) * (ddqBase(N) - ddqTarget));
-    else
-        f(i) = f(i) + 2.0 * wTq * QJ(N, i) * (qBase(N) - qTarget);
-    end
+    f(i) = f(i) + 2.0 * ( ...
+        wTq * QJ(N, i) * (qBase(N) - qTarget) + ...
+        wTdq * DqJ(N, i) * (dqBase(N) - dqTarget) + ...
+        wTddq * DdqJ(N, i) * (ddqBase(N) - ddqTarget));
     for k = 1:N
-        if useTerminalVelocity
-            f(i) = f(i) + 2.0 * ( ...
-                wq * QJ(k, i) * (qBase(k) - qTarget) + ...
-                wdq * DqJ(k, i) * (dqBase(k) - dqTarget) + ...
-                wddq * DdqJ(k, i) * (ddqBase(k) - ddqTarget));
-        else
-            f(i) = f(i) + 2.0 * wq * QJ(k, i) * (qBase(k) - qTarget);
-        end
+        f(i) = f(i) + 2.0 * ( ...
+            wq * QJ(k, i) * (qBase(k) - qTarget) + ...
+            wdq * DqJ(k, i) * (dqBase(k) - dqTarget) + ...
+            wddq * DdqJ(k, i) * (ddqBase(k) - ddqTarget));
     end
 end
 
@@ -665,19 +636,6 @@ dq = a1 + 2.0*a2*tau + 3.0*a3*tau*tau;
 ddq = 2.0*a2 + 6.0*a3*tau;
 end
 
-function [q, dq, ddq] = eval_cubic_position_only(q0, dq0, q1, T, tau)
-T2 = T*T;
-T3 = T2*T;
-d = q1 - q0 - dq0*T;
-a0 = q0;
-a1 = dq0;
-a2 = 1.5*d/T2;
-a3 = -0.5*d/T3;
-q = a0 + a1*tau + a2*tau*tau + a3*tau*tau*tau;
-dq = a1 + 2.0*a2*tau + 3.0*a3*tau*tau;
-ddq = 2.0*a2 + 6.0*a3*tau;
-end
-
 function [q, dq, ddq] = eval_quintic(q0, dq0, ddq0, q1, dq1, ddq1, T, tau)
 a0 = q0;
 a1 = dq0;
@@ -692,27 +650,6 @@ x = M \ b;
 a3 = x(1);
 a4 = x(2);
 a5 = x(3);
-tau2 = tau*tau;
-tau3 = tau2*tau;
-tau4 = tau3*tau;
-tau5 = tau4*tau;
-q = a0 + a1*tau + a2*tau2 + a3*tau3 + a4*tau4 + a5*tau5;
-dq = a1 + 2.0*a2*tau + 3.0*a3*tau2 + 4.0*a4*tau3 + 5.0*a5*tau4;
-ddq = 2.0*a2 + 6.0*a3*tau + 12.0*a4*tau2 + 20.0*a5*tau3;
-end
-
-function [q, dq, ddq] = eval_quintic_position_only(q0, dq0, ddq0, q1, T, tau)
-a0 = q0;
-a1 = dq0;
-a2 = 0.5*ddq0;
-T2 = T*T;
-T3 = T2*T;
-T4 = T3*T;
-T5 = T4*T;
-d = q1 - (a0 + a1*T + a2*T2);
-a3 = (5.0/3.0)*d/T3;
-a4 = -(5.0/6.0)*d/T4;
-a5 = (1.0/6.0)*d/T5;
 tau2 = tau*tau;
 tau3 = tau2*tau;
 tau4 = tau3*tau;

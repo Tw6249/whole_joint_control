@@ -21,7 +21,7 @@ struct LogSample {
     int joint_id = 0;
     JointState measured;
     JointCommand command;
-    std::array<double, 32> debug{};
+    std::array<double, kJointDebugSize> debug{};
     std::uint32_t flags = 0;
 };
 

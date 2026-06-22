@@ -6,13 +6,13 @@
 
 | 路径 | 角色 | 说明 |
 |---|---|---|
-| `README.md` | 项目总入口 | 构建、运行、配置和实验数据库的简要说明。 |
+| `README.md` | 项目总入口 | 构建、运行、配置和实验输出的简要说明。 |
 | `include/` | C++ 头文件 | 控制器、参考轨迹、配置解析、安全逻辑等核心实现。 |
 | `src/` | C++ 源文件 | 控制器运行入口、mock 闭环、MuJoCo stepper 等。 |
-| `scripts/` | Python 工具脚本 | MuJoCo 运行、参数拟合、数据库管理、可视化 dashboard。 |
-| `config/` | 运行配置 | 全身、右膝、Ruckig、RL-smoothed 等 YAML 配置。 |
+| `scripts/` | Python 工具脚本 | MuJoCo 运行、参数拟合、分析和绘图脚本。 |
+| `config/` | 运行配置 | 全身、右膝、RL-smoothed 等 YAML 配置。 |
 | `tests/` | 单元/安全测试 | 当前主要为 C++ safety/config/interpolation 测试。 |
-| `docs/` | 工程文档 | 数据库设计、使用说明、项目结构索引。 |
+| `docs/` | 工程文档 | 项目结构索引和工程说明。 |
 
 ## 实验与报告
 
@@ -28,9 +28,8 @@
 
 | 路径 | 角色 | 说明 |
 |---|---|---|
-| `data/` | 本地实验输出 | CSV、Parquet、SQLite 数据库、MuJoCo run 输出。已在 `.gitignore` 中，默认不提交。 |
+| `data/` | 本地实验输出 | CSV、图表、视频和 MuJoCo run 输出。已在 `.gitignore` 中，默认不提交。 |
 | `build/` | 本地构建输出 | CMake/MSVC 生成物。已在 `.gitignore` 中，默认不提交。 |
-| `third_party/ruckig/` | 第三方 Ruckig 源码 | 在线轨迹生成依赖。若后续改用 submodule 或包管理，可再收敛。 |
 | `h1_official_mujoco/` | Unitree H1 MuJoCo 资源 | MJCF、mesh、场景、图片和许可证。 |
 
 ## 当前推荐规则
@@ -58,4 +57,4 @@
 - 将 `test.py` 重命名并移动到 `scripts/` 或删除，如果它只是临时测试。
 - 判断 `eid_control.m` 是算法参考还是旧实验脚本；若是参考实现，建议移入 `analysis_artifacts/eid_matlab_reference/` 或 `docs/reference/`。
 - 将 `eid-rl/` 中仍有价值的图片和文字归档到 `eid_rl_report_package/` 或 `analysis_artifacts/`，其余保留为 raw materials。
-- 若 `third_party/ruckig/` 不需要直接修改，后续可考虑改为 git submodule 或记录版本来源。
+

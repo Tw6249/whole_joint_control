@@ -16,10 +16,7 @@ ctest --test-dir build -C Debug --output-on-failure
 
 | 文件 | 用途 |
 |------|------|
-| `config/h1_full_body_mujoco_fit.yaml` | MuJoCo / mock 使用 |
-| `config/h1_right_knee_mujoco_ruckig.yaml` | MuJoCo / mock 的右膝单关节 EID + Ruckig 对照配置 |
-| `config/h1_right_knee_mujoco_ruckig_pd.yaml` | MuJoCo 的右膝单关节 PD + Ruckig 插值器冒烟测试配置 |
-| `config/h1_full_body_real_template.yaml` | 实机模板（更保守） |
+| `config/h1_full_body_mujoco_fit.yaml` | MuJoCo / mock / 实机共用 |
 
 重新拟合 MuJoCo 参数：
 
@@ -62,14 +59,8 @@ policy source -> policy point -> policy-period interpolation -> control referenc
 |----------|------|
 | `open_loop` | 从上一个 policy 点插值到当前 policy 点 |
 | `closed_loop` | 每个 policy 周期开始时读取当前 q/dq，向目标插值 |
-| `ruckig` | 每个控制周期用 jerk-limited 在线轨迹生成追踪下一个 policy 点 |
-| `rl_smoothed` | 面向 RL position-only 输出：目标速度由 policy 点差分低通得到，目标加速度由目标速度差分低通并与当前参考加速度混合得到 |
 
-`ruckig` 模式需要设置 `policy_max_acceleration` 和 `policy_max_jerk`。
 最大速度默认使用对应关节的 `joint_limits.<id>.dq_max`。
-`policy_ruckig_target_velocity` 默认为 `policy`；只有下一点、不想强追策略速度时可设为 `zero`。
-Ruckig 会把到下一个 policy 点的剩余时间作为 `minimum_duration`，避免按最快时间冲到目标点。
-`rl_smoothed` 模式需要设置 `policy_max_acceleration`，可用 `policy_rl_velocity_alpha`、`policy_rl_acceleration_alpha`、`policy_rl_target_acceleration_blend` 调整差分速度、差分加速度和当前参考加速度的混合强度。
 所有插值模式只把 policy source 当作离散位置点来源；即使仿真 source 是 `sine`，插值器也不会读取解析速度或解析加速度。
 
 `startup_blend_duration_s` 用于实机启动保护，MuJoCo 配置默认 `0.0`。
@@ -84,15 +75,7 @@ python scripts/run_mujoco.py \
     --duration 10.0 --export-summary
 ```
 
-Ruckig 对照实验：
-
-```powershell
-python scripts/run_mujoco.py \
-    --config config/h1_right_knee_mujoco_ruckig_pd.yaml \
-    --duration 10.0 --export-summary
-```
-
-Python 只做 MuJoCo 物理、stepper 通信和输出。控制算法由 C++ stepper 执行，YAML 中 `controller.kind` 选择 EID 或 PD。
+Python 只做 MuJoCo 物理、stepper 通信和输出。控制算法由 C++ stepper 执行，YAML 中 `controller.kind` 选择控制器。
 
 输出（`--out-dir` 目录下）：
 - `mujoco_closed_loop_log.csv` — 逐帧日志
@@ -106,19 +89,6 @@ Python 只做 MuJoCo 物理、stepper 通信和输出。控制算法由 C++ step
 ```
 
 用 YAML 中的 plant 近似模型跑 C++ 控制器，不启动 MuJoCo。
-
-## 实验分析
-
-```powershell
-python scripts/db_manager.py import data/mujoco_fit/runs/<run_dir>   # 导入实验
-python scripts/db_manager.py pair <eid_id> <pd_id>                    # 配对比较
-streamlit run scripts/db_dashboard.py                                 # 分析面板
-```
-
-`db_manager.py rebuild/import` 会自动把时序 CSV 转为 `timeseries.parquet`，
-并生成 `control_metrics` 控制工程指标（误差积分、力矩能量、饱和占比、
-正弦跟踪增益和相位滞后等）。Dashboard 中的 EID improvement factor
-定义为 `PD_RMSE / EID_RMSE`；大于 1 表示 EID 的 RMSE 更低。
 
 ## 代码结构
 
@@ -141,8 +111,6 @@ src/
 scripts/
   run_mujoco.py               MuJoCo 仿真
   fit_mujoco_eid_params.py    拟合 plant 参数
-  db_manager.py               实验数据库管理
-  db_dashboard.py             Streamlit 分析面板
 
 tests/
   test_safety.cpp             安全层、配置、policy reference 回归测试
@@ -168,7 +136,7 @@ cmake --build build-h1 -j
 **1. 只读检查**
 
 ```bash
-./build-h1/h1_knee_state config/h1_full_body_real_template.yaml
+./build-h1/h1_knee_state config/h1_full_body_mujoco_fit.yaml
 ```
 
 确认 joint_id、q 方向、lowstate_age 正常。
@@ -176,14 +144,14 @@ cmake --build build-h1 -j
 **2. 单关节 PID bring-up**
 
 ```bash
-sudo ./build-h1/h1_knee_pid config/h1_full_body_real_template.yaml 0.55 8 --arm \
+sudo ./build-h1/h1_knee_pid config/h1_full_body_mujoco_fit.yaml 0.55 8 --arm \
     --kp 30 --ki 1 --kd 3 --tau-limit 12 --speed 0.15
 ```
 
 **3. 多关节 EID**
 
 ```bash
-sudo ./build-h1/h1_direct config/h1_full_body_real_template.yaml
+sudo ./build-h1/h1_direct config/h1_full_body_mujoco_fit.yaml
 ```
 
 ## 上机检查单
@@ -198,3 +166,4 @@ sudo ./build-h1/h1_direct config/h1_full_body_real_template.yaml
 [ ] policy_amplitude、kp/kd、tau_limit 从小值开始
 [ ] MuJoCo 通过不代表实机可直接大幅度运行
 ```
+

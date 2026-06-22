@@ -33,11 +33,11 @@ SAFETY_INVALID_STATE = 1 << 3
 FATAL_SAFETY_FLAGS = SAFETY_LOWSTATE_TIMEOUT | SAFETY_NONFINITE_COMMAND | SAFETY_INVALID_STATE
 
 N_MOTORS = 20
-N_DEBUG_SLOTS = 32
+N_DEBUG_SLOTS = 33
 
 # Protocol: cmd <flags> <q_cmd[20]> <dq_cmd[20]> <tau[20]> <kp[20]> <kd[20]>
-#                <debug[0][0..19]> ... <debug[31][0..19]> <joint_flags[20]>
-# = 1 (tag) + 1 + 5*20 + 32*20 + 20 = 762 values
+#                <debug[0][0..19]> ... <debug[32][0..19]> <joint_flags[20]>
+# = 1 (tag) + 1 + 5*20 + 33*20 + 20 = 782 values
 CMD_N_VALUES = 1 + 1 + 5 * N_MOTORS + N_DEBUG_SLOTS * N_MOTORS + N_MOTORS
 
 # Signal name mappings per controller kind (debug slot index -> signal name)
@@ -57,6 +57,7 @@ EID_DEBUG_NAMES: dict[int, str] = {
     26: "q_ref_raw", 27: "dq_ref_raw",
     28: "q_error_raw2", 29: "dq_error_raw2",
     30: "q_error_shaped", 31: "dq_error_shaped",
+    32: "eta_u",
 }
 
 PD_DEBUG_NAMES: dict[int, str] = {
@@ -72,11 +73,11 @@ SIGNAL_CATEGORIES = {
                   "q_error_shaped", "q_error_raw"],
     "Velocity": ["dq_actual", "dq_ref_shaped", "dq_ref_raw", "dq_ref_shaped_next",
                   "dq_error_shaped", "dq_error_raw"],
-    "Torque": ["u_t", "u_raw", "u_star", "u_feedback", "tau_cmd",
+    "Torque": ["u_t", "u_raw", "u_star", "u_feedback", "eta_u", "tau_cmd",
                "observer_tau_applied"],
     "Observer": ["eta_q", "eta_dq", "x_hat_q", "x_hat_dq", "x_bar_q", "x_bar_dq",
                   "observer_qacc"],
-    "EID Reference": ["r_d_q", "r_d_dq", "e_q", "e_dq"],
+    "EID Feedback Target": ["r_d_q", "r_d_dq", "e_q", "e_dq"],
     "Inverse Model": ["rho_q", "rho_dq"],
     "Command": ["kp_cmd", "kd_cmd"],
 }
@@ -121,6 +122,15 @@ def parse_int_list(value: str) -> list[int]:
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
     return [int(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def parse_float_list(value: str) -> list[float]:
+    value = value.strip()
+    if not value:
+        return []
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return [float(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def load_controller_references(config: Path) -> dict[int, JointReference]:
@@ -371,7 +381,7 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
     csv_path = args.out_dir / "mujoco_closed_loop_log.csv"
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save config copy for database import
+    # Save config copy alongside simulation outputs.
     config_copy = args.out_dir / "input_config.yaml"
     config_copy.write_text(args.config.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -387,6 +397,11 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
     joint_tau_sum: dict[int, float] = defaultdict(float)
     steps = int(round(args.duration / args.dt))
     log_interval = max(1, int(round(0.02 / args.dt)))  # log at 50 Hz
+    disturbance_joints = parse_int_list(args.disturbance_joints)
+    disturbance_torques = parse_float_list(args.disturbance_torques)
+    if disturbance_torques and len(disturbance_torques) != len(disturbance_joints):
+        raise RuntimeError("--disturbance-torques must have the same length as --disturbance-joints")
+    disturbance_by_joint = dict(zip(disturbance_joints, disturbance_torques))
 
     # Build CSV columns: cycle, t, joint_id, plus motor commands + all debug slots
     motor_cols = ["motor_q", "motor_dq", "motor_tau", "motor_kp", "motor_kd"]
@@ -445,6 +460,11 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                             row[col_name] = f"{command['debug_slots'][slot_idx][joint_id]:.12g}"
                         writer.writerow(row)
 
+                if disturbance_by_joint and args.disturbance_start <= t <= args.disturbance_end:
+                    for joint_id, tau_disturbance in disturbance_by_joint.items():
+                        if joint_id in info and 0 <= joint_id < len(data.ctrl):
+                            data.ctrl[joint_id] += tau_disturbance
+
                 mujoco.mj_step(model, data)
                 fix_suspended_base(data, args.height_m)
                 mujoco.mj_forward(model, data)
@@ -478,6 +498,9 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
             f"duration={args.duration}",
             f"dt={args.dt}",
             f"active_joints={','.join(str(j) for j in active_joints)}",
+            f"disturbance_joints={','.join(str(j) for j in disturbance_joints)}",
+            f"disturbance_torques={','.join(str(v) for v in disturbance_torques)}",
+            f"disturbance_window={args.disturbance_start},{args.disturbance_end}",
             f"q_rmse={q_rmse}",
             f"combined_flags={combined_flags}",
             f"fatal_flags={fatal_flags}",
@@ -502,8 +525,16 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=15.0)
     parser.add_argument("--dt", type=float, default=0.002)
     parser.add_argument("--height-m", type=float, default=1.35)
+    parser.add_argument("--disturbance-joints", default="",
+                        help="Comma-separated MuJoCo actuator ids to receive external torque.")
+    parser.add_argument("--disturbance-torques", default="",
+                        help="Comma-separated external torques [Nm], aligned with --disturbance-joints.")
+    parser.add_argument("--disturbance-start", type=float, default=0.0,
+                        help="Start time for external disturbance torque.")
+    parser.add_argument("--disturbance-end", type=float, default=0.0,
+                        help="End time for external disturbance torque.")
     parser.add_argument("--export-summary", action="store_true",
-                        help="Export per-joint summary CSV for database import.")
+                        help="Export per-joint summary CSV.")
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)

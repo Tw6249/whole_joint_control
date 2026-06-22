@@ -8,6 +8,7 @@ namespace h1if {
 
 constexpr int kMaxMotors = 20;
 constexpr int kDebugSize = 128;
+constexpr int kJointDebugSize = 33;
 
 struct JointState {
     double q = 0.0;
@@ -46,7 +47,7 @@ struct RobotCommand {
 };
 
 struct JointDebug {
-    std::array<double, 32> data{};
+    std::array<double, kJointDebugSize> data{};
     std::uint32_t flags = 0;
 };
 

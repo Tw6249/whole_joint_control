@@ -30,6 +30,8 @@ struct ControllerParams {
     double kd = 18.0;
     double observer_gain_q = 0.9;
     double observer_gain_dq = 1.1;
+    double ku_q = 0.0;
+    double ku_dq = 0.0;
     double filter_alpha = 0.3;
     PolicyInterpolation policy_interpolation = PolicyInterpolation::OpenLoop;
     PolicySource policy_source = PolicySource::Sine;
@@ -41,12 +43,7 @@ struct ControllerParams {
     double policy_phase_rad = -1.5707963267948966;
     double policy_step_time_s = 1.0;
     double policy_max_velocity = 0.0;
-    double policy_max_acceleration = 0.0;
-    double policy_max_jerk = 0.0;
-    double policy_rl_velocity_alpha = 0.35;
-    double policy_rl_acceleration_alpha = 0.25;
-    double policy_rl_target_acceleration_blend = 0.5;
-    RuckigTargetVelocity policy_ruckig_target_velocity = RuckigTargetVelocity::Policy;
+    int policy_reference_points = 4;
     double startup_blend_duration_s = 4.0;
     double tau_limit = 0.0;
     double tau_slew_rate = 0.0;
@@ -213,13 +210,10 @@ inline PolicyInterpolation parsePolicyInterpolation(const std::string& value) {
     if (token == "closed_loop" || token == "closedloop" || token == "closed") {
         return PolicyInterpolation::ClosedLoop;
     }
-    if (token == "ruckig") {
-        return PolicyInterpolation::Ruckig;
+    if (token == "preview_mpc" || token == "previewmpc" || token == "mpc") {
+        return PolicyInterpolation::PreviewMpc;
     }
-    if (token == "rl_smoothed" || token == "rlsmooth" || token == "rl_smooth") {
-        return PolicyInterpolation::RlSmoothed;
-    }
-    throw std::runtime_error("policy_interpolation must be open_loop, closed_loop, ruckig, or rl_smoothed");
+    throw std::runtime_error("policy_interpolation must be open_loop, closed_loop, or preview_mpc");
 }
 
 inline PolicySource parsePolicySource(const std::string& value) {
@@ -234,17 +228,6 @@ inline PolicySource parsePolicySource(const std::string& value) {
         return PolicySource::Step;
     }
     throw std::runtime_error("policy_source must be hold, sine, or step");
-}
-
-inline RuckigTargetVelocity parseRuckigTargetVelocity(const std::string& value) {
-    const std::string token = normalizeToken(trim(value));
-    if (token == "policy" || token == "policy_velocity") {
-        return RuckigTargetVelocity::Policy;
-    }
-    if (token == "zero" || token == "stop") {
-        return RuckigTargetVelocity::Zero;
-    }
-    throw std::runtime_error("policy_ruckig_target_velocity must be policy or zero");
 }
 
 inline void parseControllerParamField(ControllerParams& cfg,
@@ -274,11 +257,12 @@ inline void parseControllerParamField(ControllerParams& cfg,
     if (key == "eid_tau_slew_rate") {
         throw std::runtime_error("removed controller field 'eid_tau_slew_rate'; use tau_slew_rate");
     }
-
     if (key == "kp") cfg.kp = toDouble(value);
     else if (key == "kd") cfg.kd = toDouble(value);
     else if (key == "observer_gain_q") cfg.observer_gain_q = toDouble(value);
     else if (key == "observer_gain_dq") cfg.observer_gain_dq = toDouble(value);
+    else if (key == "ku_q") cfg.ku_q = toDouble(value);
+    else if (key == "ku_dq") cfg.ku_dq = toDouble(value);
     else if (key == "filter_alpha") cfg.filter_alpha = toDouble(value);
     else if (key == "policy_interpolation") cfg.policy_interpolation = parsePolicyInterpolation(value);
     else if (key == "policy_source") cfg.policy_source = parsePolicySource(value);
@@ -288,12 +272,7 @@ inline void parseControllerParamField(ControllerParams& cfg,
     else if (key == "policy_frequency_hz") cfg.policy_frequency_hz = toDouble(value);
     else if (key == "policy_phase_rad") cfg.policy_phase_rad = toDouble(value);
     else if (key == "policy_step_time_s") cfg.policy_step_time_s = toDouble(value);
-    else if (key == "policy_max_acceleration") cfg.policy_max_acceleration = toDouble(value);
-    else if (key == "policy_max_jerk") cfg.policy_max_jerk = toDouble(value);
-    else if (key == "policy_rl_velocity_alpha") cfg.policy_rl_velocity_alpha = toDouble(value);
-    else if (key == "policy_rl_acceleration_alpha") cfg.policy_rl_acceleration_alpha = toDouble(value);
-    else if (key == "policy_rl_target_acceleration_blend") cfg.policy_rl_target_acceleration_blend = toDouble(value);
-    else if (key == "policy_ruckig_target_velocity") cfg.policy_ruckig_target_velocity = parseRuckigTargetVelocity(value);
+    else if (key == "policy_reference_points") cfg.policy_reference_points = toInt(value);
     else if (key == "startup_blend_duration_s") cfg.startup_blend_duration_s = toDouble(value);
     else if (key == "tau_limit") cfg.tau_limit = toDouble(value);
     else if (key == "tau_slew_rate") cfg.tau_slew_rate = toDouble(value);
@@ -345,12 +324,7 @@ inline PolicyReferenceConfig makePolicyReferenceConfig(const ControllerParams& c
     ref.policy_dt = cfg.policy_dt;
     ref.step_time_s = cfg.policy_step_time_s;
     ref.max_velocity = cfg.policy_max_velocity;
-    ref.max_acceleration = cfg.policy_max_acceleration;
-    ref.max_jerk = cfg.policy_max_jerk;
-    ref.rl_velocity_alpha = cfg.policy_rl_velocity_alpha;
-    ref.rl_acceleration_alpha = cfg.policy_rl_acceleration_alpha;
-    ref.rl_target_acceleration_blend = cfg.policy_rl_target_acceleration_blend;
-    ref.ruckig_target_velocity = cfg.policy_ruckig_target_velocity;
+    ref.reference_points = cfg.policy_reference_points;
 
     if (model != nullptr && model->q_max > model->q_min) {
         const double q_min = model->q_min;
@@ -402,6 +376,12 @@ inline void validateCommonControllerConfig(const ControllerParams& c, const std:
         !finite(c.policy_frequency_hz) || !finite(c.policy_phase_rad)) {
         throw std::runtime_error(prefix + " contains non-finite policy value");
     }
+    if (c.policy_reference_points != 1 &&
+        c.policy_reference_points != 2 &&
+        c.policy_reference_points != 3 &&
+        c.policy_reference_points != 4) {
+        throw std::runtime_error(prefix + ".policy_reference_points must be 1, 2, 3, or 4");
+    }
 }
 
 inline void validateEidControllerConfig(const ControllerParams& c, const std::string& prefix) {
@@ -425,6 +405,7 @@ inline void validateEidControllerConfig(const ControllerParams& c, const std::st
         throw std::runtime_error(prefix + " tau_limit must be > 0 (set in YAML), tau_slew_rate must be >= 0");
     }
     if (!finite(c.observer_gain_q) || !finite(c.observer_gain_dq) ||
+        !finite(c.ku_q) || !finite(c.ku_dq) ||
         !finite(c.torque_safe_kp) || !finite(c.torque_safe_kd)) {
         throw std::runtime_error(prefix + " contains non-finite EID value");
     }
@@ -481,36 +462,6 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
         }
 
         const auto& lim = cfg.safety.limit[joint_id];
-        if (jc.controller.policy_interpolation == PolicyInterpolation::Ruckig ||
-            jc.controller.policy_interpolation == PolicyInterpolation::RlSmoothed) {
-            if (lim.dq_max <= 0.0f || !finite(lim.dq_max)) {
-                throw std::runtime_error(prefix + ".joint_limits.dq_max must be > 0 for constrained policy interpolation");
-            }
-        }
-        if (jc.controller.policy_interpolation == PolicyInterpolation::Ruckig) {
-            if (jc.controller.policy_max_acceleration <= 0.0 ||
-                jc.controller.policy_max_jerk <= 0.0 ||
-                !finite(jc.controller.policy_max_acceleration) ||
-                !finite(jc.controller.policy_max_jerk)) {
-                throw std::runtime_error(prefix + " policy_max_acceleration and policy_max_jerk must be > 0 for policy_interpolation=ruckig");
-            }
-        }
-        if (jc.controller.policy_interpolation == PolicyInterpolation::RlSmoothed) {
-            if (jc.controller.policy_max_acceleration <= 0.0 ||
-                !finite(jc.controller.policy_max_acceleration) ||
-                jc.controller.policy_rl_velocity_alpha < 0.0 ||
-                jc.controller.policy_rl_velocity_alpha > 1.0 ||
-                jc.controller.policy_rl_acceleration_alpha < 0.0 ||
-                jc.controller.policy_rl_acceleration_alpha > 1.0 ||
-                jc.controller.policy_rl_target_acceleration_blend < 0.0 ||
-                jc.controller.policy_rl_target_acceleration_blend > 1.0 ||
-                !finite(jc.controller.policy_rl_velocity_alpha) ||
-                !finite(jc.controller.policy_rl_acceleration_alpha) ||
-                !finite(jc.controller.policy_rl_target_acceleration_blend)) {
-                throw std::runtime_error(prefix + " rl_smoothed interpolation requires positive policy_max_acceleration and alpha/blend values in [0, 1]");
-            }
-        }
-
         if (cfg.controller.kind == ControllerKind::Eid) {
             if (!jc.has_plant) {
                 throw std::runtime_error(prefix + ".plant is required for controller.kind=eid");

@@ -103,6 +103,7 @@ public:
         jd[29] = raw_ref.now.dq - dq;
         jd[30] = ref.now.q - q;
         jd[31] = ref.now.dq - dq;
+        jd[32] = result.eta_u;
 
         for (int i = 0; i < static_cast<int>(jd.size()) && i < kDebugSize; ++i) {
             debug.data[i] = jd[i];
@@ -142,6 +143,7 @@ private:
         double observer_qacc = 0.0;
         double observer_tau_applied = 0.0;
         double u_raw = 0.0;
+        double eta_u = 0.0;
     };
 
     StepResult controllerStep(double q, double dq, const JointReferencePair& ref, double dt) {
@@ -153,19 +155,22 @@ private:
         const double x_bar_q = x_hat_q + eta_q;
         const double x_bar_dq = x_hat_dq + eta_dq;
 
-        const double r_c_q_next = ref.next.q - eta_q;
-        const double r_c_dq_next = ref.next.dq - eta_dq;
-        const double delta_r_c_q = r_c_q_next - ref.now.q;
-        const double delta_r_c_dq = r_c_dq_next - ref.now.dq;
-
         const InverseResult inv =
-            analyticInverseModel(ref.now.q, ref.now.dq, delta_r_c_q, delta_r_c_dq, dt);
+            analyticInverseModel(
+                ref.now.q,
+                ref.now.dq,
+                ref.next.q - ref.now.q,
+                ref.next.dq - ref.now.dq,
+                dt);
+
+        const double eta_u = c.ku_q * eta_q + c.ku_dq * eta_dq;
+        const double u_star_comp = inv.u_star - eta_u;
 
         const double den = c.kp * c.kp + c.kd * c.kd;
         const double w_q = den < 1.0e-12 ? 0.0 : c.kp / den;
         const double w_dq = den < 1.0e-12 ? 0.0 : c.kd / den;
-        const double r_d_q = ref.now.q + w_q * inv.u_star;
-        const double r_d_dq = ref.now.dq + w_dq * inv.u_star;
+        const double r_d_q = ref.now.q + w_q * u_star_comp;
+        const double r_d_dq = ref.now.dq + w_dq * u_star_comp;
 
         const double e_q = r_d_q - x_bar_q;
         const double e_dq = r_d_dq - x_bar_dq;
@@ -201,6 +206,7 @@ private:
         out.observer_qacc = pred.qacc;
         out.observer_tau_applied = pred.tau_applied;
         out.u_raw = u_raw;
+        out.eta_u = eta_u;
 
         x_hat_q_ = pred.q_next;
         x_hat_dq_ = pred.dq_next;
