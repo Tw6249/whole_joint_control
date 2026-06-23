@@ -138,6 +138,13 @@ int main(int argc, char** argv) {
                 combined_flags |= debug.joint[j].flags;
 
                 h1if::LogSample sample;
+                sample.experiment_id = cfg.experiment_id;
+                sample.condition_id = cfg.condition_id;
+                sample.repeat_id = cfg.repeat_id;
+                sample.disturbance_target = cfg.disturbance_target;
+                sample.disturbance_method = cfg.disturbance_method;
+                sample.config_path = cfg.config_path;
+                sample.log_path = cfg.log_path;
                 sample.cycle = state.cycle;
                 sample.t = state.t;
                 sample.dt = dt;

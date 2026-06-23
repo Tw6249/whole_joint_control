@@ -31,10 +31,10 @@ public:
     void reset(const RobotState& state) {
         const int j = jointId();
         t0_ = state.t;
-        x_hat_q_ = 0.0;
-        x_hat_dq_ = 0.0;
-        eta_q_ = state.joint[j].q;
-        eta_dq_ = state.joint[j].dq;
+        x_hat_q_ = state.joint[j].q;
+        x_hat_dq_ = state.joint[j].dq;
+        eta_q_ = 0.0;
+        eta_dq_ = 0.0;
         eta_lpf_q_ = 0.0;
         eta_lpf_dq_ = 0.0;
         q_start_ = state.joint[j].q;

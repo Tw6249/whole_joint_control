@@ -87,6 +87,12 @@ struct RuntimeConfig {
     SafetyConfig safety;
     ControllerRuntimeConfig controller;
     std::string log_path = "data/h1_mock_log.csv";
+    std::string config_path;
+    std::string experiment_id;
+    std::string condition_id;
+    std::string repeat_id;
+    std::string disturbance_target;
+    std::string disturbance_method;
 };
 
 inline std::string trim(std::string s) {
@@ -577,6 +583,12 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             else if (key == "measured_speed_trip") cfg.safety.measured_speed_trip = toDouble(value);
             else if (key == "measured_jump_trip") cfg.safety.measured_jump_trip = toDouble(value);
             else if (key == "max_control_dt") cfg.safety.max_control_dt = toDouble(value);
+        } else if (section == "experiment") {
+            if (key == "id") cfg.experiment_id = value;
+            else if (key == "condition") cfg.condition_id = value;
+            else if (key == "repeat") cfg.repeat_id = value;
+            else if (key == "disturbance_target") cfg.disturbance_target = value;
+            else if (key == "disturbance_method") cfg.disturbance_method = value;
         } else if (section == "controller") {
             if (indent == 2) {
                 current_controller_joint = -1;
@@ -660,6 +672,7 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
         }
     }
 
+    cfg.config_path = path;
     cfg.controller.defaults.control_dt = cfg.control_dt;
     for (int i = 0; i < kMaxMotors; ++i) {
         if (cfg.controller.joints[i].has_value()) {

@@ -9,9 +9,11 @@
 #include <cmath>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -53,6 +55,70 @@ double nowSec() {
 
 void signalHandler(int) {
     g_running.store(false, std::memory_order_release);
+}
+
+struct DirectRunOptions {
+    double duration_s = 0.0;
+};
+
+void printUsage(const char* argv0) {
+    std::cerr << "Usage:\n"
+              << "  " << argv0 << " <config.yaml> [--duration SEC] [--repeat ID] [--condition ID] "
+              << "[--disturbance-target TARGET] [--disturbance-method METHOD]\n\n"
+              << "If --duration is omitted, the controller runs until Ctrl+C, SIGTERM, or a safety trip.\n"
+              << "Real H1 config should set network_interface=enp3s0 and domain_id=0.\n"
+              << "unitree_mujoco config should set network_interface=lo and domain_id=1.\n";
+}
+
+DirectRunOptions applyCommandLineOptions(h1if::RuntimeConfig& cfg, int argc, char** argv) {
+    DirectRunOptions opts;
+    for (int i = 2; i < argc; ++i) {
+        const std::string key = argv[i];
+        if (i + 1 >= argc) {
+            throw std::runtime_error("missing value for " + key);
+        }
+        const std::string value = argv[++i];
+        if (key == "--duration") {
+            opts.duration_s = std::stod(value);
+            if (!std::isfinite(opts.duration_s) || opts.duration_s <= 0.0) {
+                throw std::runtime_error("--duration must be positive seconds");
+            }
+        } else if (key == "--repeat") {
+            cfg.repeat_id = value;
+        } else if (key == "--condition") {
+            cfg.condition_id = value;
+        } else if (key == "--disturbance-target") {
+            cfg.disturbance_target = value;
+        } else if (key == "--disturbance-method") {
+            cfg.disturbance_method = value;
+        } else if (key == "--experiment") {
+            cfg.experiment_id = value;
+        } else {
+            throw std::runtime_error("unknown option: " + key);
+        }
+    }
+    return opts;
+}
+
+void copyConfigSnapshot(const h1if::RuntimeConfig& cfg) {
+    namespace fs = std::filesystem;
+    if (cfg.config_path.empty() || cfg.log_path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    const fs::path log_path(cfg.log_path);
+    fs::create_directories(log_path.parent_path(), ec);
+    if (ec) {
+        std::cerr << "Warning: cannot create log directory " << log_path.parent_path()
+                  << ": " << ec.message() << "\n";
+        return;
+    }
+    const fs::path out_path = log_path.parent_path() / "input_config.yaml";
+    fs::copy_file(cfg.config_path, out_path, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        std::cerr << "Warning: cannot copy config snapshot to " << out_path << ": "
+                  << ec.message() << "\n";
+    }
 }
 
 std::uint32_t crc32Core(std::uint32_t* ptr, std::uint32_t len) {
@@ -114,6 +180,10 @@ public:
           controller_(h1if::createController(cfg_)),
           active_joints_(h1if::activeControllerJoints(cfg_)) {}
 
+    ~UnitreeH1DirectInterface() {
+        shutdown();
+    }
+
     void init() {
         initRealtimeMemory();
 
@@ -142,15 +212,20 @@ public:
         controller_->reset(readRobotState(0, cfg_.control_dt));
     }
 
-    void run() {
+    void run(double duration_s = 0.0) {
         setThreadRealtime();
 
         std::uint64_t cycle = 0;
         double last_t = nowSec();
+        const double run_start_t = last_t;
 
         while (g_running.load(std::memory_order_acquire)) {
             const auto loop_start = std::chrono::steady_clock::now();
             const double t = nowSec();
+            if (duration_s > 0.0 && t - run_start_t >= duration_s) {
+                std::cout << "controller duration reached: " << duration_s << " s\n";
+                break;
+            }
             const double actual_dt = t - last_t;
             last_t = t;
 
@@ -180,11 +255,34 @@ public:
                 loop_start + std::chrono::duration<double>(cfg_.control_dt));
         }
 
-        sendSafeHold();
-        logger_.stop();
+        shutdown();
     }
 
 private:
+    void shutdown() {
+        if (shutdown_done_) {
+            return;
+        }
+        shutdown_done_ = true;
+
+        if (lowcmd_pub_) {
+            sendSafeHold();
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
+        logger_.stop();
+
+        if (lowstate_sub_) {
+            lowstate_sub_->CloseChannel();
+            lowstate_sub_.reset();
+        }
+        if (lowcmd_pub_) {
+            lowcmd_pub_->CloseChannel();
+            lowcmd_pub_.reset();
+        }
+        unitree::robot::ChannelFactory::Instance()->Release();
+    }
+
     void initRealtimeMemory() {
         if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
             std::cerr << "Warning: mlockall failed; continuing without page locking.\n";
@@ -280,6 +378,13 @@ private:
     void pushLog(const h1if::RobotState& state, const h1if::RobotCommand& command, const h1if::ControllerDebug& debug) {
         for (int j : active_joints_) {
             h1if::LogSample sample;
+            sample.experiment_id = cfg_.experiment_id;
+            sample.condition_id = cfg_.condition_id;
+            sample.repeat_id = cfg_.repeat_id;
+            sample.disturbance_target = cfg_.disturbance_target;
+            sample.disturbance_method = cfg_.disturbance_method;
+            sample.config_path = cfg_.config_path;
+            sample.log_path = cfg_.log_path;
             sample.cycle = state.cycle;
             sample.t = state.t;
             sample.dt = state.dt;
@@ -390,16 +495,14 @@ private:
     unitree::robot::ChannelPublisherPtr<LowCmdMsg> lowcmd_pub_;
     unitree::robot::ChannelSubscriberPtr<LowStateMsg> lowstate_sub_;
     h1if::AsyncCsvLogger<> logger_;
+    bool shutdown_done_ = false;
 };
 
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage:\n"
-                  << "  " << argv[0] << " <config.yaml>\n\n"
-                  << "Real H1 config should set network_interface=enp3s0 and domain_id=0.\n"
-                  << "unitree_mujoco config should set network_interface=lo and domain_id=1.\n";
+        printUsage(argv[0]);
         return 1;
     }
 
@@ -408,16 +511,25 @@ int main(int argc, char** argv) {
 
     try {
         h1if::RuntimeConfig cfg = h1if::loadRuntimeConfig(argv[1]);
+        const DirectRunOptions opts = applyCommandLineOptions(cfg, argc, argv);
         cfg.log_path = h1if::resolveLogPath(cfg);
+        copyConfigSnapshot(cfg);
 
         std::cout << "WARNING: use only with H1 suspended, lying safely, or mechanically protected.\n"
                   << "WARNING: verify joint_id, motor mode, limits, and emergency stop before enabling.\n"
+                  << "Log path: " << cfg.log_path << "\n"
+                  << "Experiment: " << cfg.experiment_id
+                  << " condition=" << cfg.condition_id
+                  << " repeat=" << cfg.repeat_id << "\n"
+                  << "Duration: "
+                  << (opts.duration_s > 0.0 ? std::to_string(opts.duration_s) + " s" : "until stopped")
+                  << "\n"
                   << "Press Enter to continue...\n";
         std::cin.get();
 
         UnitreeH1DirectInterface robot(std::move(cfg));
         robot.init();
-        robot.run();
+        robot.run(opts.duration_s);
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "h1_direct failed: " << ex.what() << "\n";

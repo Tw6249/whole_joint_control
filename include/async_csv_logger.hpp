@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <memory>
 #include <string>
 #include <thread>
@@ -14,6 +15,13 @@
 namespace h1if {
 
 struct LogSample {
+    std::string experiment_id;
+    std::string condition_id;
+    std::string repeat_id;
+    std::string disturbance_target;
+    std::string disturbance_method;
+    std::string config_path;
+    std::string log_path;
     std::uint64_t cycle = 0;
     double t = 0.0;
     double dt = 0.0;
@@ -113,7 +121,9 @@ private:
     }
 
     void writeHeader() {
-        out_ << "cycle,t,dt,lowstate_age,joint_id,q,dq,tau_est,"
+        out_ << "experiment_id,condition_id,repeat_id,disturbance_target,disturbance_method,"
+             << "config_path,log_path,"
+             << "cycle,t,dt,lowstate_age,joint_id,q,dq,tau_est,"
              << "q_cmd,dq_cmd,kp_cmd,kd_cmd,tau_cmd,flags";
         for (int i = 0; i < static_cast<int>(LogSample{}.debug.size()); ++i) {
             out_ << ",debug_" << i;
@@ -122,7 +132,22 @@ private:
     }
 
     void writeSample(const LogSample& s) {
-        out_ << s.cycle << ','
+        out_ << std::setprecision(17);
+        writeCsvCell(s.experiment_id);
+        out_ << ',';
+        writeCsvCell(s.condition_id);
+        out_ << ',';
+        writeCsvCell(s.repeat_id);
+        out_ << ',';
+        writeCsvCell(s.disturbance_target);
+        out_ << ',';
+        writeCsvCell(s.disturbance_method);
+        out_ << ',';
+        writeCsvCell(s.config_path);
+        out_ << ',';
+        writeCsvCell(s.log_path);
+        out_ << ','
+             << s.cycle << ','
              << s.t << ','
              << s.dt << ','
              << s.lowstate_age << ','
@@ -140,6 +165,23 @@ private:
             out_ << ',' << value;
         }
         out_ << "\n";
+    }
+
+    void writeCsvCell(const std::string& value) {
+        const bool quote = value.find_first_of(",\"\n\r") != std::string::npos;
+        if (!quote) {
+            out_ << value;
+            return;
+        }
+        out_ << '"';
+        for (char ch : value) {
+            if (ch == '"') {
+                out_ << "\"\"";
+            } else {
+                out_ << ch;
+            }
+        }
+        out_ << '"';
     }
 
     std::unique_ptr<std::array<LogSample, Capacity>> buffer_{
