@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--yes", action="store_true", help="Skip the RUN_P1 confirmation prompt.")
     parser.add_argument("--no-sudo", action="store_true", help="Run h1_direct directly instead of through sudo.")
     parser.add_argument("--direct", type=Path, default=DEFAULT_DIRECT, help="Path to h1_direct executable.")
-    parser.add_argument("--repeats", type=int, default=10, help="Repeats per method.")
+    parser.add_argument("--repeats", type=int, default=5, help="Repeats per method.")
     parser.add_argument("--duration", type=float, default=8.0, help="Duration per run in seconds.")
     parser.add_argument("--pause", type=float, default=5.0, help="Pause between runs in seconds.")
     parser.add_argument("--start-index", type=int, default=1, help="Repeat index for the first run.")

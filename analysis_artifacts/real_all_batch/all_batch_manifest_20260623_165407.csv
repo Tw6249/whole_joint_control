@@ -1,0 +1,5 @@
+batch_time,batch,description,command,start_time,end_time,returncode,status
+2026-06-23T16:54:07,p1,P1 PD/EID no-disturbance baseline,python3 scripts/run_real_p1_batch.py --execute --yes,2026-06-23T16:54:07,2026-06-23T16:56:16,0,ok
+2026-06-23T16:54:07,p2,P2 PD/EID disturbance comparison,python3 scripts/run_real_p2_batch.py --target hip --disturbance-method manual_push --execute --yes,2026-06-23T16:56:26,2026-06-23T16:58:55,0,ok
+2026-06-23T16:54:07,p3,P3 quintic vs Preview-MPC reference comparison,python3 scripts/run_real_p3_batch.py --execute --yes,2026-06-23T16:59:05,2026-06-23T16:59:54,0,ok
+2026-06-23T16:54:07,p4,P4 EID Ko/Ku parameter scan,python3 scripts/run_real_p4_batch.py --scan ko --target none --disturbance-method manual_push --execute --yes,2026-06-23T17:00:04,2026-06-23T17:04:00,0,ok

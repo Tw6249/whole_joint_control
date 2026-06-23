@@ -29,6 +29,8 @@ struct LogSample {
     int joint_id = 0;
     JointState measured;
     JointCommand command;
+    double tau_dist = 0.0;
+    double disturbance_scale = 0.0;
     std::array<double, kJointDebugSize> debug{};
     std::uint32_t flags = 0;
 };
@@ -128,6 +130,7 @@ private:
         for (int i = 0; i < static_cast<int>(LogSample{}.debug.size()); ++i) {
             out_ << ",debug_" << i;
         }
+        out_ << ",tau_dist,disturbance_scale";
         out_ << "\n";
     }
 
@@ -164,6 +167,9 @@ private:
         for (double value : s.debug) {
             out_ << ',' << value;
         }
+        out_ << ','
+             << s.tau_dist << ','
+             << s.disturbance_scale;
         out_ << "\n";
     }
 

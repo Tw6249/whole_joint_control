@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -40,6 +41,7 @@ constexpr const char* kTopicLowCmd = "rt/lowcmd";
 constexpr const char* kTopicLowState = "rt/lowstate";
 constexpr float kPosStopF = 2.146E9f;
 constexpr float kVelStopF = 16000.0f;
+constexpr double kPi = 3.14159265358979323846;
 
 std::atomic<bool> g_running{true};
 
@@ -59,15 +61,129 @@ void signalHandler(int) {
 
 struct DirectRunOptions {
     double duration_s = 0.0;
+    bool software_disturbance_enabled = false;
+    std::vector<int> software_disturbance_joints;
+    std::vector<double> software_disturbance_torques;
+    double software_disturbance_start_s = 4.0;
+    double software_disturbance_plateau_start_s = 4.2;
+    double software_disturbance_plateau_end_s = 5.2;
+    double software_disturbance_end_s = 5.4;
 };
 
 void printUsage(const char* argv0) {
     std::cerr << "Usage:\n"
               << "  " << argv0 << " <config.yaml> [--duration SEC] [--repeat ID] [--condition ID] "
-              << "[--disturbance-target TARGET] [--disturbance-method METHOD]\n\n"
+              << "[--disturbance-target TARGET] [--disturbance-method METHOD]\n"
+              << "      [--software-disturbance-joints IDS] [--software-disturbance-torques NM]\n"
+              << "      [--software-disturbance-start SEC]\n"
+              << "      [--software-disturbance-plateau-start SEC]\n"
+              << "      [--software-disturbance-plateau-end SEC]\n"
+              << "      [--software-disturbance-end SEC]\n\n"
               << "If --duration is omitted, the controller runs until Ctrl+C, SIGTERM, or a safety trip.\n"
+              << "Software disturbance lists are comma-separated and are disabled unless joints/torques are set.\n"
               << "Real H1 config should set network_interface=enp3s0 and domain_id=0.\n"
               << "unitree_mujoco config should set network_interface=lo and domain_id=1.\n";
+}
+
+std::vector<int> parseIntList(const std::string& value, const std::string& label) {
+    std::vector<int> result;
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (item.empty()) {
+            throw std::runtime_error(label + " contains an empty item");
+        }
+        std::size_t used = 0;
+        const int parsed = std::stoi(item, &used);
+        if (used != item.size()) {
+            throw std::runtime_error(label + " contains a non-integer item: " + item);
+        }
+        result.push_back(parsed);
+    }
+    return result;
+}
+
+std::vector<double> parseDoubleList(const std::string& value, const std::string& label) {
+    std::vector<double> result;
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (item.empty()) {
+            throw std::runtime_error(label + " contains an empty item");
+        }
+        std::size_t used = 0;
+        const double parsed = std::stod(item, &used);
+        if (used != item.size() || !std::isfinite(parsed)) {
+            throw std::runtime_error(label + " contains an invalid number: " + item);
+        }
+        result.push_back(parsed);
+    }
+    return result;
+}
+
+double parseDoubleScalar(const std::string& value, const std::string& label) {
+    std::size_t used = 0;
+    const double parsed = std::stod(value, &used);
+    if (used != value.size() || !std::isfinite(parsed)) {
+        throw std::runtime_error(label + " must be a finite number");
+    }
+    return parsed;
+}
+
+std::string joinIntList(const std::vector<int>& values) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            out << ",";
+        }
+        out << values[i];
+    }
+    return out.str();
+}
+
+std::string joinDoubleList(const std::vector<double>& values) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            out << ",";
+        }
+        out << values[i];
+    }
+    return out.str();
+}
+
+void validateDirectRunOptions(DirectRunOptions& opts) {
+    const bool has_joints = !opts.software_disturbance_joints.empty();
+    const bool has_torques = !opts.software_disturbance_torques.empty();
+    if (has_joints != has_torques) {
+        throw std::runtime_error(
+            "--software-disturbance-joints and --software-disturbance-torques must be provided together");
+    }
+    opts.software_disturbance_enabled = has_joints && has_torques;
+    if (!opts.software_disturbance_enabled) {
+        return;
+    }
+    if (opts.software_disturbance_joints.size() != opts.software_disturbance_torques.size()) {
+        throw std::runtime_error(
+            "--software-disturbance-joints and --software-disturbance-torques must have the same length");
+    }
+    for (int joint_id : opts.software_disturbance_joints) {
+        if (joint_id < 0 || joint_id >= h1if::kMaxMotors) {
+            throw std::runtime_error("software disturbance joint id out of range: " + std::to_string(joint_id));
+        }
+    }
+    const double t0 = opts.software_disturbance_start_s;
+    const double t1 = opts.software_disturbance_plateau_start_s;
+    const double t2 = opts.software_disturbance_plateau_end_s;
+    const double t3 = opts.software_disturbance_end_s;
+    if (!std::isfinite(t0) || !std::isfinite(t1) || !std::isfinite(t2) || !std::isfinite(t3) ||
+        t0 < 0.0 || t1 < t0 || t2 < t1 || t3 <= t2) {
+        throw std::runtime_error(
+            "software disturbance timing must satisfy 0 <= start <= plateau-start <= plateau-end < end");
+    }
+    if (opts.duration_s > 0.0 && t3 > opts.duration_s) {
+        throw std::runtime_error("--software-disturbance-end must not exceed --duration");
+    }
 }
 
 DirectRunOptions applyCommandLineOptions(h1if::RuntimeConfig& cfg, int argc, char** argv) {
@@ -79,7 +195,7 @@ DirectRunOptions applyCommandLineOptions(h1if::RuntimeConfig& cfg, int argc, cha
         }
         const std::string value = argv[++i];
         if (key == "--duration") {
-            opts.duration_s = std::stod(value);
+            opts.duration_s = parseDoubleScalar(value, key);
             if (!std::isfinite(opts.duration_s) || opts.duration_s <= 0.0) {
                 throw std::runtime_error("--duration must be positive seconds");
             }
@@ -93,10 +209,23 @@ DirectRunOptions applyCommandLineOptions(h1if::RuntimeConfig& cfg, int argc, cha
             cfg.disturbance_method = value;
         } else if (key == "--experiment") {
             cfg.experiment_id = value;
+        } else if (key == "--software-disturbance-joints") {
+            opts.software_disturbance_joints = parseIntList(value, key);
+        } else if (key == "--software-disturbance-torques") {
+            opts.software_disturbance_torques = parseDoubleList(value, key);
+        } else if (key == "--software-disturbance-start") {
+            opts.software_disturbance_start_s = parseDoubleScalar(value, key);
+        } else if (key == "--software-disturbance-plateau-start") {
+            opts.software_disturbance_plateau_start_s = parseDoubleScalar(value, key);
+        } else if (key == "--software-disturbance-plateau-end") {
+            opts.software_disturbance_plateau_end_s = parseDoubleScalar(value, key);
+        } else if (key == "--software-disturbance-end") {
+            opts.software_disturbance_end_s = parseDoubleScalar(value, key);
         } else {
             throw std::runtime_error("unknown option: " + key);
         }
     }
+    validateDirectRunOptions(opts);
     return opts;
 }
 
@@ -175,8 +304,9 @@ struct AtomicRobotCache {
 
 class UnitreeH1DirectInterface {
 public:
-    explicit UnitreeH1DirectInterface(h1if::RuntimeConfig cfg)
+    UnitreeH1DirectInterface(h1if::RuntimeConfig cfg, DirectRunOptions opts)
         : cfg_(std::move(cfg)),
+          opts_(std::move(opts)),
           controller_(h1if::createController(cfg_)),
           active_joints_(h1if::activeControllerJoints(cfg_)) {}
 
@@ -245,10 +375,15 @@ public:
             } else {
                 h1if::fillSafeHoldCommand(state, command, cfg_.safety);
             }
+
+            const double elapsed_s = t - run_start_t;
+            const double disturbance_scale = softwareDisturbanceScale(elapsed_s);
+            const std::array<double, h1if::kMaxMotors> tau_dist =
+                applySoftwareDisturbance(command, disturbance_scale);
             h1if::applySafety(state, command, debug, cfg_.safety);
 
             writeLowCmd(command);
-            pushLog(state, command, debug);
+            pushLog(state, command, debug, tau_dist, disturbance_scale);
 
             ++cycle;
             std::this_thread::sleep_until(
@@ -375,7 +510,11 @@ private:
         lowcmd_pub_->Write(low_cmd_);
     }
 
-    void pushLog(const h1if::RobotState& state, const h1if::RobotCommand& command, const h1if::ControllerDebug& debug) {
+    void pushLog(const h1if::RobotState& state,
+                 const h1if::RobotCommand& command,
+                 const h1if::ControllerDebug& debug,
+                 const std::array<double, h1if::kMaxMotors>& tau_dist,
+                 double disturbance_scale) {
         for (int j : active_joints_) {
             h1if::LogSample sample;
             sample.experiment_id = cfg_.experiment_id;
@@ -392,12 +531,55 @@ private:
             sample.joint_id = j;
             sample.measured = state.joint[j];
             sample.command = command.joint[j];
+            sample.tau_dist = tau_dist[j];
+            sample.disturbance_scale = disturbance_scale;
             sample.flags = debug.flags | debug.joint[j].flags;
             for (int i = 0; i < static_cast<int>(sample.debug.size()); ++i) {
                 sample.debug[i] = debug.joint[j].data[i];
             }
             logger_.push(sample);
         }
+    }
+
+    double softwareDisturbanceScale(double elapsed_s) const {
+        if (!opts_.software_disturbance_enabled) {
+            return 0.0;
+        }
+        const double t0 = opts_.software_disturbance_start_s;
+        const double t1 = opts_.software_disturbance_plateau_start_s;
+        const double t2 = opts_.software_disturbance_plateau_end_s;
+        const double t3 = opts_.software_disturbance_end_s;
+        if (elapsed_s < t0 || elapsed_s >= t3) {
+            return 0.0;
+        }
+        if (elapsed_s < t1) {
+            if (t1 == t0) {
+                return 1.0;
+            }
+            const double r = (elapsed_s - t0) / (t1 - t0);
+            return 0.5 - 0.5 * std::cos(kPi * r);
+        }
+        if (elapsed_s <= t2) {
+            return 1.0;
+        }
+        const double r = (elapsed_s - t2) / (t3 - t2);
+        return 0.5 + 0.5 * std::cos(kPi * r);
+    }
+
+    std::array<double, h1if::kMaxMotors> applySoftwareDisturbance(
+        h1if::RobotCommand& command,
+        double disturbance_scale) const {
+        std::array<double, h1if::kMaxMotors> tau_dist{};
+        if (!opts_.software_disturbance_enabled || disturbance_scale == 0.0) {
+            return tau_dist;
+        }
+        for (std::size_t i = 0; i < opts_.software_disturbance_joints.size(); ++i) {
+            const int joint_id = opts_.software_disturbance_joints[i];
+            const double tau = disturbance_scale * opts_.software_disturbance_torques[i];
+            command.joint[joint_id].tau += static_cast<float>(tau);
+            tau_dist[joint_id] = tau;
+        }
+        return tau_dist;
     }
 
     void sendSafeHold() {
@@ -486,6 +668,7 @@ private:
     }
 
     h1if::RuntimeConfig cfg_;
+    DirectRunOptions opts_;
     std::unique_ptr<h1if::IController> controller_;
     std::vector<int> active_joints_;
     std::array<double, h1if::kMaxMotors> last_q_{};
@@ -523,11 +706,20 @@ int main(int argc, char** argv) {
                   << " repeat=" << cfg.repeat_id << "\n"
                   << "Duration: "
                   << (opts.duration_s > 0.0 ? std::to_string(opts.duration_s) + " s" : "until stopped")
-                  << "\n"
-                  << "Press Enter to continue...\n";
+                  << "\n";
+        if (opts.software_disturbance_enabled) {
+            std::cout << "Software disturbance: joints="
+                      << joinIntList(opts.software_disturbance_joints)
+                      << " torques_Nm=" << joinDoubleList(opts.software_disturbance_torques)
+                      << " window=" << opts.software_disturbance_start_s
+                      << "," << opts.software_disturbance_plateau_start_s
+                      << "," << opts.software_disturbance_plateau_end_s
+                      << "," << opts.software_disturbance_end_s << "\n";
+        }
+        std::cout << "Press Enter to continue...\n";
         std::cin.get();
 
-        UnitreeH1DirectInterface robot(std::move(cfg));
+        UnitreeH1DirectInterface robot(std::move(cfg), opts);
         robot.init();
         robot.run(opts.duration_s);
         return 0;
