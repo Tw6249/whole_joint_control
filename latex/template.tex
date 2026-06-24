@@ -1,0 +1,206 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+% ========== 页面与字体 ==========
+\usepackage{geometry}
+\geometry{left=2.6cm,right=2.6cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\IfFontExistsTF{Consolas}
+  {\setmonofont{Consolas}}
+  {\setmonofont{Courier New}}
+
+\usepackage{setspace}
+\onehalfspacing
+
+% ========== 数学与图表 ==========
+\usepackage{amsmath, amsthm}
+\usepackage{unicode-math}
+\IfFontExistsTF{Cambria Math}{\setmathfont{Cambria Math}}{}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+
+% ========== 颜色与链接 ==========
+\usepackage{xcolor}
+\definecolor{mainblue}{HTML}{2F5597}
+\definecolor{lightblue}{HTML}{EAF2FF}
+\definecolor{darkgray}{HTML}{333333}
+
+\usepackage[
+    colorlinks=true,
+    linkcolor=mainblue,
+    citecolor=mainblue,
+    urlcolor=mainblue
+]{hyperref}
+
+% ========== 标题样式 ==========
+\usepackage{titlesec}
+
+\titleformat{\section}
+  {\Large\bfseries\color{mainblue}}
+  {\thesection}{0.8em}{}
+
+\titleformat{\subsection}
+  {\large\bfseries\color{darkgray}}
+  {\thesubsection}{0.8em}{}
+
+\titleformat{\subsubsection}
+  {\normalsize\bfseries}
+  {\thesubsubsection}{0.8em}{}
+
+% ========== 页眉页脚 ==========
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\headheight}{14.5pt}
+\fancyhf{}
+\fancyhead[L]{\color{mainblue}课程报告}
+\fancyhead[R]{\color{mainblue}\leftmark}
+\fancyfoot[C]{\thepage}
+
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ========== 代码样式 ==========
+\usepackage{listings}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{mainblue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{teal},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    breaklines=true,
+    backgroundcolor=\color{lightblue},
+    rulecolor=\color{mainblue},
+    tabsize=4
+}
+
+% ========== 漂亮的提示框 ==========
+\usepackage[most]{tcolorbox}
+
+\newtcolorbox{notebox}{
+    colback=lightblue,
+    colframe=mainblue,
+    arc=2mm,
+    boxrule=0.8pt,
+    left=8pt,
+    right=8pt,
+    top=6pt,
+    bottom=6pt,
+    title=\textbf{提示}
+}
+
+% ========== 定理环境 ==========
+\newtheorem{theorem}{定理}
+\newtheorem{definition}{定义}
+\newtheorem{example}{例}
+
+% ========== 文档信息 ==========
+\title{
+    \vspace{2cm}
+    \Huge \textbf{\color{mainblue}一份漂亮的 \LaTeX{} 中文模板} \\[0.5em]
+    \Large Elegant Chinese LaTeX Template
+}
+\author{
+    作者姓名 \\[0.3em]
+    \small 学校 / 单位
+}
+\date{\today}
+
+% ========== 正文开始 ==========
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{2cm}
+
+\begin{abstract}
+本文档提供了一个简洁、美观、适合中文写作的 \LaTeX{} 模板。它包含标题页、目录、页眉页脚、数学公式、表格、代码块、提示框和定理环境等常用结构。
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{引言}
+
+这是一个适合课程论文、实验报告、读书笔记和技术文档的中文 \LaTeX{} 模板。
+
+\begin{notebox}
+这个模板推荐使用 \textbf{XeLaTeX} 编译，能够较好地支持中文字体。
+\end{notebox}
+
+\section{数学公式示例}
+
+下面是一个行内公式：$E = mc^2$。
+
+下面是一个独立公式：
+
+\[
+    \int_{-\infty}^{+\infty} e^{-x^2} \, dx = \sqrt{\pi}
+\]
+
+也可以写带编号的公式：
+
+\begin{equation}
+    a^2 + b^2 = c^2
+\end{equation}
+
+\section{表格示例}
+
+\begin{table}[htbp]
+\centering
+\caption{实验结果示例}
+\begin{tabular}{cccc}
+\toprule
+编号 & 方法 & 准确率 & 时间/s \\
+\midrule
+1 & 方法 A & 92.5\% & 1.23 \\
+2 & 方法 B & 94.1\% & 1.56 \\
+3 & 方法 C & 95.3\% & 1.48 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{图片示例}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.65\textwidth]{example-image}
+\caption{这里放置图片标题}
+\end{figure}
+
+\section{代码示例}
+
+\begin{lstlisting}[language=Python, caption={Python 示例代码}]
+def hello(name):
+    print(f"Hello, {name}!")
+
+hello("LaTeX")
+\end{lstlisting}
+
+\section{定理环境示例}
+
+\begin{definition}
+若函数 $f(x)$ 在点 $x_0$ 的某个邻域内有定义，并且极限
+\[
+    \lim_{x \to x_0} f(x)
+\]
+存在，则称该极限为函数在 $x_0$ 处的极限。
+\end{definition}
+
+\begin{theorem}
+若函数 $f(x)$ 在闭区间 $[a,b]$ 上连续，则 $f(x)$ 在该区间上有界。
+\end{theorem}
+
+\section{结论}
+
+本文档展示了一个基础但美观的中文 \LaTeX{} 模板。你可以在此基础上继续添加参考文献、算法环境、封面图片或学校格式要求。
+
+\end{document}

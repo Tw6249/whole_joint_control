@@ -1,0 +1,30 @@
+{
+  "latex-workshop.latex.recipe.default": "first",
+  "latex-workshop.latex.recipes": [
+    {
+      "name": "MiKTeX XeLaTeX",
+      "tools": [
+        "miktex-xelatex",
+        "miktex-xelatex",
+        "miktex-xelatex"
+      ]
+    }
+  ],
+  "latex-workshop.latex.tools": [
+    {
+      "name": "miktex-xelatex",
+      "command": "C:\\Users\\tanwei\\AppData\\Local\\Programs\\MiKTeX\\miktex\\bin\\x64\\xelatex.exe",
+      "args": [
+        "-synctex=1",
+        "-interaction=nonstopmode",
+        "-file-line-error",
+        "-output-directory=%OUTDIR%",
+        "%DOC%"
+      ]
+    }
+  ],
+  "latex-workshop.latex.env": {
+    "Path": "C:\\Users\\tanwei\\AppData\\Local\\Programs\\MiKTeX\\miktex\\bin\\x64;${env:Path}"
+  },
+  "latex-workshop.latex.outDir": "%DIR%"
+}

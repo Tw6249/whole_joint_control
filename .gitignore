@@ -5,7 +5,8 @@ cmake-build-*/
 
 # IDE
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.user
 
 # CMake generated
@@ -15,11 +16,15 @@ cmake_install.cmake
 CTestTestfile.cmake
 Makefile
 
+# LaTeX generated
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
 # Test artifacts
 Testing/Temporary/
-
-# Run outputs
-data/
 
 # Python
 __pycache__/
