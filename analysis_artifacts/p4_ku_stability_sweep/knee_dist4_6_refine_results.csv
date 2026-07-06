@@ -1,0 +1,4 @@
+after3_dq_peak,after3_eta_u_peak,diverged,flags,ku_dq,ku_q,ku_scale,observer_gain_dq,observer_gain_q,out_dir,reason,returncode,win4_6_coord_rmse,win4_6_hip_rmse,win4_6_knee_rmse,win4_6_rmse
+13.8244033414,20.5205513556,False,4,9.0,108.0,9.0,0.225,0.9,analysis_artifacts\p4_ku_stability_sweep\runs_knee_dist4_6_refine\ku_x9,ok,0,1.1258665894141364,0.5657019468711759,0.946159661503614,0.7794988126195166
+14.2988076587,19.6959051934,False,4,10.0,120.0,10.0,0.225,0.9,analysis_artifacts\p4_ku_stability_sweep\runs_knee_dist4_6_refine\ku_x10,ok,0,1.1311753959640223,0.5517925699209422,0.9536819694103925,0.7790970218780336
+12.1346074891,17.6690799348,False,4,11.0,132.0,11.0,0.225,0.9,analysis_artifacts\p4_ku_stability_sweep\runs_knee_dist4_6_refine\ku_x11,ok,0,1.1344080736942457,0.531330994937358,0.9653633134184727,0.7791787192536175

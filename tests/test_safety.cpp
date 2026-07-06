@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 
 namespace {
 
@@ -97,6 +98,8 @@ int main() {
     assert(h1if::parsePolicyInterpolation("open_loop") == h1if::PolicyInterpolation::OpenLoop);
     assert(h1if::parsePolicyInterpolation("closed-loop") == h1if::PolicyInterpolation::ClosedLoop);
     assert(h1if::parsePolicyInterpolation("preview_mpc") == h1if::PolicyInterpolation::PreviewMpc);
+    assert(h1if::parsePolicyInterpolation("preview_mpc_velocity") ==
+           h1if::PolicyInterpolation::PreviewMpcVelocity);
     assert(h1if::parsePolicySource("hold") == h1if::PolicySource::Hold);
     assert(h1if::parsePolicySource("sine") == h1if::PolicySource::Sine);
     assert(h1if::parsePolicySource("step") == h1if::PolicySource::Step);
@@ -212,13 +215,104 @@ int main() {
         cfg.phase_rad = -1.5707963267948966;
         cfg.reference_points = 2;
         h1if::PolicyReferenceInterpolator preview_ref(cfg);
-        const auto first = preview_ref.sample(0.052, 0.002, 0.5, 0.0);
-        const auto later = preview_ref.sample(0.090, 0.002, 0.5, 0.0);
-        assert(std::isfinite(first.now.q));
-        assert(std::isfinite(first.now.dq));
-        assert(std::isfinite(later.now.q));
-        assert(std::isfinite(later.now.dq));
-        assert(std::abs(first.now.dq) > 1.0e-9 || std::abs(later.now.dq) > 1.0e-9);
+        bool threw = false;
+        try {
+            (void)preview_ref.sample(0.052, 0.002, 0.5, 0.0);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        assert(threw);
+    }
+
+    {
+        h1if::PolicyReferenceConfig cfg;
+        cfg.interpolation = h1if::PolicyInterpolation::PreviewMpc;
+        cfg.source = h1if::PolicySource::Sine;
+        cfg.policy_dt = 0.05;
+        cfg.center = 0.5;
+        cfg.amplitude = 0.1;
+        cfg.frequency_hz = 0.4;
+        cfg.phase_rad = -1.5707963267948966;
+        cfg.reference_points = 3;
+        h1if::PolicyReferenceInterpolator preview_ref(cfg);
+        (void)preview_ref.sample(0.0, 0.002, 0.5, 0.0);
+        (void)preview_ref.sample(0.05, 0.002, 0.5, 0.0);
+        const auto boundary = preview_ref.sample(0.10, 0.002, 0.5, 0.0);
+        const double expected = cfg.center + cfg.amplitude *
+            std::sin(2.0 * 3.14159265358979323846 * cfg.frequency_hz * 0.05 + cfg.phase_rad);
+        assert(std::isfinite(boundary.now.q));
+        assert(std::isfinite(boundary.now.dq));
+        assert(std::abs(boundary.now.q - expected) < 1.0e-8);
+        const auto mid = preview_ref.sample(0.086, 0.002, 0.5, 0.0);
+        assert(std::isfinite(mid.now.q));
+        assert(std::isfinite(mid.now.dq));
+        assert(std::isfinite(mid.now.ddq));
+    }
+
+    {
+        h1if::PolicyReferenceConfig cfg;
+        cfg.interpolation = h1if::PolicyInterpolation::PreviewMpcVelocity;
+        cfg.source = h1if::PolicySource::Sine;
+        cfg.policy_dt = 0.05;
+        cfg.center = 0.5;
+        cfg.amplitude = 0.1;
+        cfg.frequency_hz = 0.4;
+        cfg.phase_rad = -1.5707963267948966;
+        cfg.reference_points = 4;
+        h1if::PolicyReferenceInterpolator preview_ref(cfg);
+        (void)preview_ref.sample(0.0, 0.002, 0.5, 0.0);
+        (void)preview_ref.sample(0.05, 0.002, 0.5, 0.0);
+        const auto boundary = preview_ref.sample(0.10, 0.002, 0.5, 0.0);
+        const double expected = cfg.center + cfg.amplitude *
+            std::sin(2.0 * 3.14159265358979323846 * cfg.frequency_hz * 0.05 + cfg.phase_rad);
+        assert(std::isfinite(boundary.now.q));
+        assert(std::isfinite(boundary.now.dq));
+        assert(std::isfinite(boundary.now.ddq));
+        assert(std::abs(boundary.now.q - expected) < 1.0e-8);
+        const auto mid = preview_ref.sample(0.086, 0.002, 0.5, 0.0);
+        assert(std::isfinite(mid.now.q));
+        assert(std::isfinite(mid.now.dq));
+        assert(std::isfinite(mid.now.ddq));
+    }
+
+    {
+        h1if::PolicyReferenceConfig cfg;
+        cfg.interpolation = h1if::PolicyInterpolation::PreviewMpcVelocity;
+        cfg.source = h1if::PolicySource::Sine;
+        cfg.policy_dt = 0.05;
+        cfg.center = 0.5;
+        cfg.amplitude = 0.1;
+        cfg.frequency_hz = 0.4;
+        cfg.phase_rad = -1.5707963267948966;
+        cfg.reference_points = 3;
+        h1if::PolicyReferenceInterpolator preview_ref(cfg);
+        bool threw = false;
+        try {
+            (void)preview_ref.sample(0.052, 0.002, 0.5, 0.0);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        assert(threw);
+    }
+
+    {
+        h1if::PolicyReferenceConfig cfg;
+        cfg.interpolation = h1if::PolicyInterpolation::PreviewMpc;
+        cfg.source = h1if::PolicySource::Sine;
+        cfg.policy_dt = 0.05;
+        cfg.center = 0.5;
+        cfg.amplitude = 0.1;
+        cfg.frequency_hz = 0.4;
+        cfg.phase_rad = -1.5707963267948966;
+        cfg.reference_points = 1;
+        h1if::PolicyReferenceInterpolator preview_ref(cfg);
+        bool threw = false;
+        try {
+            (void)preview_ref.sample(0.052, 0.002, 0.5, 0.0);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        assert(threw);
     }
 
     const std::string valid_multi_config = R"YAML(
@@ -453,7 +547,200 @@ joint_limits:
         assert(cmd.joint[2].kp == 18.0f);
         assert(cmd.joint[2].kd == 2.0f);
         assert(cmd.joint[2].tau == 0.0f);
-        assert(cmd.joint[2].q != static_cast<float>(state.joint[2].q));
+        assert(cmd.joint[2].enable);
+        assert(std::isfinite(cmd.joint[2].q));
+    }
+
+    const std::string invalid_preview_config = R"YAML(
+robot: H1
+control_dt: 0.002
+controller:
+  kind: position_pd
+  defaults:
+    kp: 18.0
+    kd: 2.0
+    policy_interpolation: preview_mpc
+    policy_reference_points: 1
+    policy_source: sine
+    policy_dt: 0.05
+    policy_center: 0.5
+    policy_amplitude: 0.05
+    policy_frequency_hz: 0.1
+  joints:
+    2:
+      name: RightKnee
+      enabled: true
+
+joint_limits:
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 8.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto invalid_preview_path = writeTempConfig("h1if_invalid_preview.yaml", invalid_preview_config);
+    {
+        bool threw = false;
+        try {
+            (void)h1if::loadRuntimeConfig(invalid_preview_path.string());
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        assert(threw);
+    }
+
+    const std::string selected_mpc_config = R"YAML(
+robot: H1
+control_dt: 0.002
+controller:
+  kind: position_pd
+  defaults:
+    kp: 18.0
+    kd: 2.0
+    policy_interpolation: preview_mpc
+    policy_reference_points: 3
+    policy_source: sine
+    policy_dt: 0.05
+    policy_center: 0.5
+    policy_amplitude: 0.05
+    policy_frequency_hz: 0.1
+  joints:
+    2:
+      name: RightKnee
+      enabled: true
+
+joint_limits:
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 8.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto selected_mpc_path = writeTempConfig("h1if_selected_mpc.yaml", selected_mpc_config);
+    h1if::RuntimeConfig selected_mpc_cfg = h1if::loadRuntimeConfig(selected_mpc_path.string());
+    assert(selected_mpc_cfg.controller.joints[2]->controller.policy_interpolation ==
+           h1if::PolicyInterpolation::PreviewMpc);
+    assert(selected_mpc_cfg.controller.joints[2]->controller.policy_reference_points == 3);
+
+    const std::string velocity_mpc_config = R"YAML(
+robot: H1
+control_dt: 0.002
+controller:
+  kind: position_pd
+  defaults:
+    kp: 18.0
+    kd: 2.0
+    policy_interpolation: preview_mpc_velocity
+    policy_reference_points: 4
+    policy_source: sine
+    policy_dt: 0.05
+    policy_center: 0.5
+    policy_amplitude: 0.05
+    policy_frequency_hz: 0.1
+  joints:
+    2:
+      name: RightKnee
+      enabled: true
+
+joint_limits:
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 8.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto velocity_mpc_path = writeTempConfig("h1if_velocity_mpc.yaml", velocity_mpc_config);
+    h1if::RuntimeConfig velocity_mpc_cfg = h1if::loadRuntimeConfig(velocity_mpc_path.string());
+    assert(velocity_mpc_cfg.controller.joints[2]->controller.policy_interpolation ==
+           h1if::PolicyInterpolation::PreviewMpcVelocity);
+    assert(velocity_mpc_cfg.controller.joints[2]->controller.policy_reference_points == 4);
+
+    const std::string invalid_velocity_mpc_config = R"YAML(
+robot: H1
+control_dt: 0.002
+controller:
+  kind: position_pd
+  defaults:
+    kp: 18.0
+    kd: 2.0
+    policy_interpolation: preview_mpc_velocity
+    policy_reference_points: 3
+    policy_source: sine
+    policy_dt: 0.05
+    policy_center: 0.5
+    policy_amplitude: 0.05
+    policy_frequency_hz: 0.1
+  joints:
+    2:
+      name: RightKnee
+      enabled: true
+
+joint_limits:
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 8.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto invalid_velocity_mpc_path =
+        writeTempConfig("h1if_invalid_velocity_mpc.yaml", invalid_velocity_mpc_config);
+    {
+        bool threw = false;
+        try {
+            (void)h1if::loadRuntimeConfig(invalid_velocity_mpc_path.string());
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        assert(threw);
+    }
+
+    const std::string removed_variant_config = R"YAML(
+robot: H1
+control_dt: 0.002
+controller:
+  kind: position_pd
+  defaults:
+    kp: 18.0
+    kd: 2.0
+    policy_interpolation: preview_mpc
+    policy_mpc_variant: impossible_variant
+    policy_reference_points: 3
+    policy_source: sine
+    policy_dt: 0.05
+    policy_center: 0.5
+    policy_amplitude: 0.05
+    policy_frequency_hz: 0.1
+  joints:
+    2:
+      name: RightKnee
+      enabled: true
+
+joint_limits:
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 8.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto removed_variant_path = writeTempConfig("h1if_removed_variant.yaml", removed_variant_config);
+    {
+        bool threw = false;
+        try {
+            (void)h1if::loadRuntimeConfig(removed_variant_path.string());
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        assert(threw);
     }
 
     const auto legacy_path = writeTempConfig("h1if_legacy_config.yaml", R"YAML(

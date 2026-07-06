@@ -117,6 +117,39 @@ def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(x, hi))
 
 
+def disturbance_scale_at(args: argparse.Namespace, t: float) -> float:
+    """Return the external input-disturbance envelope at time t."""
+    if not parse_float_list(args.disturbance_torques):
+        return 0.0
+    plateau_start = args.disturbance_plateau_start
+    plateau_end = args.disturbance_plateau_end
+    if plateau_start is None and plateau_end is None:
+        return 1.0 if args.disturbance_start <= t <= args.disturbance_end else 0.0
+    if plateau_start is None or plateau_end is None:
+        raise RuntimeError(
+            "--disturbance-plateau-start and --disturbance-plateau-end must be provided together"
+        )
+    t0 = args.disturbance_start
+    t1 = plateau_start
+    t2 = plateau_end
+    t3 = args.disturbance_end
+    if not (0.0 <= t0 <= t1 <= t2 < t3):
+        raise RuntimeError(
+            "disturbance timing must satisfy 0 <= start <= plateau-start <= plateau-end < end"
+        )
+    if t < t0 or t >= t3:
+        return 0.0
+    if t < t1:
+        if t1 == t0:
+            return 1.0
+        r = (t - t0) / (t1 - t0)
+        return 0.5 - 0.5 * math.cos(math.pi * r)
+    if t <= t2:
+        return 1.0
+    r = (t - t2) / (t3 - t2)
+    return 0.5 + 0.5 * math.cos(math.pi * r)
+
+
 def parse_int_list(value: str) -> list[int]:
     value = value.strip()
     if value.startswith("[") and value.endswith("]"):
@@ -396,7 +429,9 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
     joint_abs_err_max: dict[int, float] = defaultdict(float)
     joint_tau_sum: dict[int, float] = defaultdict(float)
     steps = int(round(args.duration / args.dt))
-    log_interval = max(1, int(round(0.02 / args.dt)))  # log at 50 Hz
+    if args.log_interval_s <= 0.0:
+        raise RuntimeError("--log-interval-s must be positive")
+    log_interval = 1 if args.log_every_step else max(1, int(round(args.log_interval_s / args.dt)))
     disturbance_joints = parse_int_list(args.disturbance_joints)
     disturbance_torques = parse_float_list(args.disturbance_torques)
     if disturbance_torques and len(disturbance_torques) != len(disturbance_joints):
@@ -404,7 +439,10 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
     disturbance_by_joint = dict(zip(disturbance_joints, disturbance_torques))
 
     # Build CSV columns: cycle, t, joint_id, plus motor commands + all debug slots
-    motor_cols = ["motor_q", "motor_dq", "motor_tau", "motor_kp", "motor_kd"]
+    motor_cols = [
+        "motor_q", "motor_dq", "motor_tau", "motor_kp", "motor_kd",
+        "tau_applied", "tau_dist", "tau_total", "disturbance_scale",
+    ]
     debug_names = EID_DEBUG_NAMES if controller_kind == "eid" else PD_DEBUG_NAMES
     debug_cols = [debug_names.get(i, f"debug_{i}") for i in range(N_DEBUG_SLOTS)]
     csv_columns = ["cycle", "t", "joint_id"] + motor_cols + debug_cols + ["flags", "joint_flags"]
@@ -417,6 +455,7 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                 t = step * args.dt
                 fix_suspended_base(data, args.height_m)
                 command = send_state(proc, step, t, args.dt, data, info)
+                disturbance_scale = disturbance_scale_at(args, t)
                 combined_flags |= command["flags"]
                 data.ctrl[:] = 0.0
 
@@ -429,7 +468,9 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                         + float(command["kd"][joint_id]) * (float(command["dq_cmd"][joint_id]) - dq)
                         + float(command["tau"][joint_id])
                     )
-                    data.ctrl[joint_id] = tau_applied
+                    tau_dist = disturbance_scale * disturbance_by_joint.get(joint_id, 0.0)
+                    tau_total = tau_applied + tau_dist
+                    data.ctrl[joint_id] = tau_total
 
                     # Use debug slot 0 (shaped q_ref) as reference for summary tracking
                     q_ref = float(command["debug_slots"][0][joint_id])
@@ -452,6 +493,10 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                             "motor_tau": f"{command['tau'][joint_id]:.12g}",
                             "motor_kp": f"{command['kp'][joint_id]:.12g}",
                             "motor_kd": f"{command['kd'][joint_id]:.12g}",
+                            "tau_applied": f"{tau_applied:.12g}",
+                            "tau_dist": f"{tau_dist:.12g}",
+                            "tau_total": f"{tau_total:.12g}",
+                            "disturbance_scale": f"{disturbance_scale:.12g}",
                             "flags": str(command["flags"]),
                             "joint_flags": str(command["joint_flags"][joint_id]),
                         }
@@ -460,10 +505,9 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
                             row[col_name] = f"{command['debug_slots'][slot_idx][joint_id]:.12g}"
                         writer.writerow(row)
 
-                if disturbance_by_joint and args.disturbance_start <= t <= args.disturbance_end:
-                    for joint_id, tau_disturbance in disturbance_by_joint.items():
-                        if joint_id in info and 0 <= joint_id < len(data.ctrl):
-                            data.ctrl[joint_id] += tau_disturbance
+                for joint_id, tau_disturbance in disturbance_by_joint.items():
+                    if joint_id not in active_joints and joint_id in info and 0 <= joint_id < len(data.ctrl):
+                        data.ctrl[joint_id] += disturbance_scale * tau_disturbance
 
                 mujoco.mj_step(model, data)
                 fix_suspended_base(data, args.height_m)
@@ -501,6 +545,8 @@ def run_simulation(args: argparse.Namespace) -> tuple[Path, float]:
             f"disturbance_joints={','.join(str(j) for j in disturbance_joints)}",
             f"disturbance_torques={','.join(str(v) for v in disturbance_torques)}",
             f"disturbance_window={args.disturbance_start},{args.disturbance_end}",
+            f"disturbance_plateau={args.disturbance_plateau_start},{args.disturbance_plateau_end}",
+            f"log_interval_s={args.dt if args.log_every_step else args.log_interval_s}",
             f"q_rmse={q_rmse}",
             f"combined_flags={combined_flags}",
             f"fatal_flags={fatal_flags}",
@@ -524,6 +570,10 @@ def main() -> int:
     parser.add_argument("--out-dir", type=Path, default=Path("data/mujoco_fit/latest"))
     parser.add_argument("--duration", type=float, default=15.0)
     parser.add_argument("--dt", type=float, default=0.002)
+    parser.add_argument("--log-interval-s", type=float, default=0.02,
+                        help="CSV logging interval in seconds. Default logs at 50 Hz.")
+    parser.add_argument("--log-every-step", action="store_true",
+                        help="Log every MuJoCo/controller step instead of using --log-interval-s.")
     parser.add_argument("--height-m", type=float, default=1.35)
     parser.add_argument("--disturbance-joints", default="",
                         help="Comma-separated MuJoCo actuator ids to receive external torque.")
@@ -531,6 +581,10 @@ def main() -> int:
                         help="Comma-separated external torques [Nm], aligned with --disturbance-joints.")
     parser.add_argument("--disturbance-start", type=float, default=0.0,
                         help="Start time for external disturbance torque.")
+    parser.add_argument("--disturbance-plateau-start", type=float, default=None,
+                        help="Start time of the full-amplitude disturbance plateau.")
+    parser.add_argument("--disturbance-plateau-end", type=float, default=None,
+                        help="End time of the full-amplitude disturbance plateau.")
     parser.add_argument("--disturbance-end", type=float, default=0.0,
                         help="End time for external disturbance torque.")
     parser.add_argument("--export-summary", action="store_true",

@@ -1,0 +1,165 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+% ========== 页面与字体 ==========
+\usepackage{geometry}
+\geometry{left=2.6cm,right=2.6cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\IfFontExistsTF{Consolas}
+  {\setmonofont{Consolas}}
+  {\setmonofont{Courier New}}
+
+\usepackage{setspace}
+\onehalfspacing
+\emergencystretch=3em
+\sloppy
+
+% ========== 数学与图表 ==========
+\usepackage{amsmath, amsthm}
+\usepackage{unicode-math}
+\IfFontExistsTF{Cambria Math}{\setmathfont{Cambria Math}}{}
+\usepackage{graphicx}
+\graphicspath{{../../../../}}
+\setkeys{Gin}{width=\linewidth,keepaspectratio}
+\usepackage{booktabs}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\usepackage{longtable}
+\usepackage{calc}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\small\setlength{\tabcolsep}{2pt}}
+
+% ========== 颜色与链接 ==========
+\usepackage{xcolor}
+\definecolor{mainblue}{HTML}{2F5597}
+\definecolor{lightblue}{HTML}{EAF2FF}
+\definecolor{darkgray}{HTML}{333333}
+\usepackage{xurl}
+\Urlmuskip=0mu plus 1mu
+
+\usepackage[
+    colorlinks=true,
+    linkcolor=mainblue,
+    citecolor=mainblue,
+    urlcolor=mainblue
+]{hyperref}
+
+% ========== 标题样式 ==========
+\usepackage{titlesec}
+\setcounter{secnumdepth}{0}
+
+\titleformat{\section}
+  {\Large\bfseries\color{mainblue}}
+  {}{0em}{}
+
+\titleformat{\subsection}
+  {\large\bfseries\color{darkgray}}
+  {}{0em}{}
+
+\titleformat{\subsubsection}
+  {\normalsize\bfseries}
+  {}{0em}{}
+
+% ========== 页眉页脚 ==========
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\headheight}{14.5pt}
+\fancyhf{}
+\fancyhead[L]{\color{mainblue}右髋-右膝 EID 分析报告}
+\fancyhead[R]{\color{mainblue}\leftmark}
+\fancyfoot[C]{\thepage}
+
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ========== 代码样式 ==========
+\usepackage{listings}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{mainblue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{teal},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    breaklines=true,
+    backgroundcolor=\color{lightblue},
+    rulecolor=\color{mainblue},
+    tabsize=4,
+    columns=fullflexible,
+    keepspaces=true
+}
+
+% ========== 漂亮的提示框 ==========
+\usepackage[most]{tcolorbox}
+
+\newtcolorbox{notebox}{
+    colback=lightblue,
+    colframe=mainblue,
+    arc=2mm,
+    boxrule=0.8pt,
+    left=8pt,
+    right=8pt,
+    top=6pt,
+    bottom=6pt,
+    title=\textbf{提示}
+}
+
+% ========== 定理环境 ==========
+\newtheorem{theorem}{定理}
+\newtheorem{definition}{定义}
+\newtheorem{example}{例}
+
+% ========== Pandoc 兼容定义 ==========
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\newcommand{\passthrough}[1]{#1}
+\makeatletter
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{%
+  \sbox\pandoc@box{#1}%
+  \ifdim\wd\pandoc@box>\linewidth
+    \sbox\pandoc@box{\resizebox{\linewidth}{!}{\usebox\pandoc@box}}%
+  \fi
+  \ifdim\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax>.68\textheight
+    \resizebox{!}{.68\textheight}{\usebox\pandoc@box}%
+  \else
+    \usebox\pandoc@box%
+  \fi}
+\makeatother
+
+% ========== 文档信息 ==========
+\title{
+    \vspace{2cm}
+    \Huge \textbf{\color{mainblue}右髋-右膝输入域 EID 调参与扰动机理分析报告} \\[0.5em]
+    \Large Unitree H1 Hip-Knee EID Tuning and Disturbance Mechanism Analysis
+}
+\author{
+    \small 实机日志、离线分析与 MuJoCo 机制验证
+}
+\date{2026年6月29日}
+
+% ========== 正文开始 ==========
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{1.2cm}
+
+\begin{abstract}
+本报告的核心发现是：当前输入域等效输入扰动（equivalent input disturbance, EID）整体结构在 P2D 软件输入端等效扰动下确有部分收益，但不是全指标优势，也不是免费鲁棒性。P2D 指右髋和右膝同时叠加可复现软件力矩脉冲的 PD/EID 对比实验；在该实验中，相对普通位置-速度反馈控制（PD），EID 将髋窗口 RMSE 降低 18.2\%、协调窗口 RMSE 降低 6.1\%，但膝窗口 RMSE 上升 10.0\%，平均 \(\Delta\tau_{\rm est}\) RMS 增加约 28.0\%。进一步的 \(\eta_u=K_u\eta\) 对齐、力矩项分解、结构消融和残差扫描显示，输入补偿通道 \(\eta_u\) 不是当前窗口 RMSE 的主要杠杆；现有证据更支持主要动态变化来自 \(\bar{x}=\hat{x}+\eta\) 反馈中心、残差定义和观测器增益 \(K_o\)。因此，下一轮不应继续扩大 \(K_u\) 或共同倍率扫描，而应以 \(\mathrm{O4+U1}\) 为保守基线，优先验证只提高髋 \(K_o\) 与 \(\mathrm{O5+U1}\) 两类误差收益候选，并用降低膝观测器/膝速度通道的候选检验膝力矩活动机制。\(\mathrm{O4+U1}\) 表示标称观测器增益和弱输入补偿的组合；\(\mathrm{O5+U1}\) 表示更高观测器增益和同一弱输入补偿的组合，是待实机验证假设，不是本轮已验证结论。MuJoCo 和局部模型仅用于仿真预筛和机理解释，不能作为实机安全裕度或真实物理外扰验证的依据。
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+\input{body.tex}
+
+\end{document}

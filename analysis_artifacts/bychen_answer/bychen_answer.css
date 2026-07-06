@@ -1,0 +1,104 @@
+body {
+  margin: 2rem auto 4rem;
+  max-width: 1080px;
+  padding: 0 1.25rem;
+  color: #1f2933;
+  font-family: "Microsoft YaHei", "SimSun", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.72;
+  background: #ffffff;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.35;
+  color: #102a43;
+}
+
+h1 {
+  margin-top: 0;
+  padding-bottom: 0.6rem;
+  border-bottom: 2px solid #d9e2ec;
+  font-size: 1.9rem;
+}
+
+h2 {
+  margin-top: 2.2rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #e5eaf0;
+  font-size: 1.45rem;
+}
+
+h3 {
+  margin-top: 1.6rem;
+  font-size: 1.15rem;
+}
+
+a {
+  color: #0067b8;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1rem auto 1.4rem;
+  border: 1px solid #d9e2ec;
+}
+
+table {
+  width: 100%;
+  margin: 1rem 0 1.35rem;
+  border-collapse: collapse;
+  font-size: 0.94rem;
+}
+
+th,
+td {
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d9e2ec;
+  vertical-align: top;
+}
+
+th {
+  background: #f0f4f8;
+  color: #102a43;
+  font-weight: 700;
+}
+
+tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+blockquote {
+  margin: 1rem 0;
+  padding: 0.15rem 1rem;
+  border-left: 4px solid #9fb3c8;
+  color: #334e68;
+  background: #f8fafc;
+}
+
+code {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+#TOC {
+  margin: 1.2rem 0 2rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d9e2ec;
+  background: #f8fafc;
+}
+
+#TOC ul {
+  margin: 0.25rem 0;
+}

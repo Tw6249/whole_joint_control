@@ -1,0 +1,5 @@
+method,direction,unconstrained_best_acc_gain_for_min_row3_rms,best_gain_if_only_increase_from_original
+PD,hip_to_knee,0.5573440944677992,1.0
+EID,hip_to_knee,0.30493887977420026,1.0
+PD,knee_to_hip,0.648308244895747,1.0
+EID,knee_to_hip,0.2919985022388658,1.0

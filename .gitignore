@@ -2,6 +2,8 @@
 build-h1/
 build/
 cmake-build-*/
+output/
+tmp/
 
 # IDE
 .idea/
@@ -18,10 +20,13 @@ Makefile
 
 # LaTeX generated
 *.aux
+*.fdb_latexmk
+*.fls
 *.log
 *.out
 *.toc
 *.synctex.gz
+*.xdv
 
 # Test artifacts
 Testing/Temporary/

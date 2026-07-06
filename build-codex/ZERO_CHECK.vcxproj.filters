@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\twx\Documents\BaiduSyncdisk\whole_joint_control\build-codex\CMakeFiles\380452aba1214761b2a80b95dbe9a2fe\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{E6B6DE53-D69D-325E-9CE4-ED3767EE8592}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

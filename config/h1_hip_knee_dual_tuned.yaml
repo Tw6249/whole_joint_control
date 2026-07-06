@@ -21,8 +21,8 @@ controller:
     ku_q: 45.0
     ku_dq: 8.0
     filter_alpha: 0.5
-    policy_interpolation: open_loop
-    policy_reference_points: 4
+    policy_interpolation: preview_mpc
+    policy_reference_points: 3
     policy_source: sine
     policy_dt: 0.05
     policy_step_time_s: 1.0

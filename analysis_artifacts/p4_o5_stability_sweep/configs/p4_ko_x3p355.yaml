@@ -1,0 +1,88 @@
+robot: H1
+domain_id: 0
+network_interface: eth0
+control_dt: 0.002
+mock_duration: 5.0
+log_path: data/h1_real_p4_ko_o5_hip_knee_eid_log.csv
+experiment:
+  id: P4
+  condition: P4_EID_Ko_scale_3.355_mujoco_nodist_fine
+  repeat: set_before_run
+  disturbance_target: manual_fill_in_run_record
+  disturbance_method: physical_or_software_fill_in_run_record
+safe_hold:
+  kp: 6.0
+  kd: 1.0
+  lowstate_timeout: 0.05
+  measured_speed_trip: 2.0
+  measured_jump_trip: 0.08
+  max_control_dt: 0.01
+controller:
+  kind: eid
+  defaults:
+    kp: 120.0
+    kd: 5.0
+    observer_gain_q: 2.684
+    observer_gain_dq: 0.671
+    ku_q: 12.0
+    ku_dq: 1.0
+    filter_alpha: 0.85
+    policy_interpolation: open_loop
+    policy_reference_points: 4
+    policy_source: sine
+    policy_dt: 0.05
+    policy_frequency_hz: 0.576
+    startup_blend_duration_s: 3.0
+    tau_slew_rate: 100.0
+    torque_safe_kp: 0.0
+    torque_safe_kd: 0.0
+    inverse_q_weight: 0.0
+    inverse_dq_weight: 0.0
+  joints:
+    1:
+      name: RightHipPitch
+      enabled: true
+      policy_center: -0.3
+      policy_amplitude: 0.1144
+      policy_phase_rad: -1.57079633
+      tau_limit: 18.0
+      plant:
+        Jeff: 1.00508532
+        b: 1
+        gravityA: 15.7100627
+        gravityB: 2.79723089
+        tau0: 0
+        q_min: -3.14
+        q_max: 2.53
+        tau_max: 200
+    2:
+      name: RightKnee
+      enabled: true
+      policy_center: 0.5
+      policy_amplitude: 0.143
+      policy_phase_rad: 1.57079633
+      tau_limit: 18.0
+      plant:
+        Jeff: 0.2501484
+        b: 1
+        gravityA: 4.14117407
+        gravityB: -2.09365203
+        tau0: 0
+        q_min: -0.26
+        q_max: 2.05
+        tau_max: 300
+joint_limits:
+  1:
+    q_min: -3.14
+    q_max: 2.53
+    dq_max: 23
+    tau_max: 18.0
+    kp_max: 120
+    kd_max: 5
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14
+    tau_max: 18.0
+    kp_max: 120
+    kd_max: 5.0

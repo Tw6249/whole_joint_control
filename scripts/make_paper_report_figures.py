@@ -12,7 +12,6 @@ import pandas as pd
 
 ROOT = Path("analysis_artifacts")
 DOMAIN_METRICS = ROOT / "hip_knee_domain_experiment" / "hip_knee_domain_metrics.csv"
-PREVIEW_METRICS = ROOT / "preview_mpc_interpolation" / "preview_mpc_metrics.csv"
 OUT_DIR = ROOT / "hip_knee_domain_experiment" / "figures"
 
 METHOD_LABELS = {
@@ -24,21 +23,6 @@ METHOD_COLORS = {
     "G0_no_eid": "#8A8F98",
     "G1_input_domain": "#009E73",
 }
-
-PREVIEW_LABELS = {
-    "quintic_stop": "Quintic-stop",
-    "mpc_1": "MPC-1",
-    "mpc_2": "MPC-2",
-    "mpc_3": "MPC-3",
-}
-
-PREVIEW_COLORS = {
-    "quintic_stop": "#8A8F98",
-    "mpc_1": "#E69F00",
-    "mpc_2": "#0072B2",
-    "mpc_3": "#009E73",
-}
-
 
 def set_style() -> None:
     plt.rcParams.update({
@@ -111,51 +95,10 @@ def plot_domain_summary() -> None:
     save(fig, "paper_domain_summary")
 
 
-def plot_preview_summary() -> None:
-    df = pd.read_csv(PREVIEW_METRICS)
-    scenarios = ["smooth_sine", "multi_reversal", "step_hold"]
-    scenario_labels = ["Sine", "Reversal", "Step"]
-    methods = ["quintic_stop", "mpc_1", "mpc_2", "mpc_3"]
-    specs = [
-        ("ddq_rms", r"$\ddot q_\mathrm{rms}$ [rad/s$^2$]"),
-        ("jerk_rms", r"$j_\mathrm{rms}$ [rad/s$^3$]"),
-    ]
-
-    x = np.arange(len(scenarios))
-    width = 0.19
-    fig, axes = plt.subplots(1, 2, figsize=(6.85, 2.35))
-
-    for ax, (metric, ylabel) in zip(axes, specs):
-        for idx, method in enumerate(methods):
-            values = [
-                float(df[(df["scenario"] == scene) & (df["method"] == method)][metric].iloc[0])
-                for scene in scenarios
-            ]
-            ax.bar(
-                x + (idx - 1.5) * width,
-                values,
-                width=width,
-                color=PREVIEW_COLORS[method],
-                label=PREVIEW_LABELS[method],
-            )
-        ax.set_xticks(x)
-        ax.set_xticklabels(scenario_labels)
-        ax.set_ylabel(ylabel)
-        ax.set_yscale("log")
-        ax.grid(True, axis="y")
-        ax.grid(False, axis="x")
-
-    axes[0].legend(loc="upper left", frameon=False, ncol=4, bbox_to_anchor=(0.0, 1.20))
-    fig.tight_layout(w_pad=1.2)
-    save(fig, "paper_preview_summary")
-
-
 def main() -> int:
     set_style()
     plot_domain_summary()
-    plot_preview_summary()
     print(f"wrote={OUT_DIR / 'paper_domain_summary.png'}")
-    print(f"wrote={OUT_DIR / 'paper_preview_summary.png'}")
     return 0
 
 

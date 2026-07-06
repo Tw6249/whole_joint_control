@@ -1,0 +1,36 @@
+after3_dq_peak,after3_eta_u_peak,after3_q_peak,after3_rmse,diverged,flags,ko_scale_vs_o4,observer_gain_dq,observer_gain_q,out_dir,reason,returncode,stderr_tail,win4_6_eta_u_peak,win4_6_q_peak,win4_6_rmse
+13.4870575453,3.45284428967,1.6789150179749996,0.5597286938907344,False,4,2.1,0.42000000000000004,1.6800000000000002,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p1,ok,0,,0.202182686373,0.6090024773730001,0.34343795881237077
+13.9667845866,3.09372064108,1.4919797038240001,0.4972742309285548,False,4,2.2,0.44000000000000006,1.7600000000000002,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p2,ok,0,,0.205303934044,0.5713583691240001,0.3432484089276325
+13.4002594394,4.37952773114,1.635483360835,0.5481164013755896,False,4,2.3,0.45999999999999996,1.8399999999999999,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p3,ok,0,,1.20375977744,0.645606081844,0.3445476816311992
+13.352926894,3.14020712301,1.6241543857849998,0.5520560453453361,False,4,2.4,0.48,1.92,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p4,ok,0,,0.769567010202,0.6487208922859999,0.3453691867375737
+13.4181711551,5.36225907579,1.674095896435,0.5732873809514619,False,4,2.5,0.5,2.0,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p5,ok,0,,0.21263270107,0.649796421729,0.34711561845129923
+11.5345253878,6.55787641222,1.536329980795,0.5187530086559308,False,4,2.6,0.52,2.08,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p6,ok,0,,0.214450171473,0.571361383469,0.33177720858026233
+12.4505710041,34.9638692546,1.7074288845030001,0.5108038507735456,False,4,2.7,0.54,2.16,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p7,ok,0,,0.215969769514,0.571361776404,0.3272122169056366
+,,,,True,,2.8,0.5599999999999999,2.2399999999999998,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p8,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,,
+,,,,True,,2.9,0.58,2.32,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p9,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,,
+,,,,True,,2.95,0.5900000000000001,2.3600000000000003,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p95,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,,
+,,,,True,,2.98,0.596,2.384,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_refine\ko_x2p98,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,,

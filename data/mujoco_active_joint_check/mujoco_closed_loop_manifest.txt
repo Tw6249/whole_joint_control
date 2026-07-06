@@ -1,0 +1,19 @@
+C++ controller closed-loop MuJoCo simulation
+scene=h1_official_mujoco\scene.xml
+config=analysis_artifacts\mujoco_hardware_plan_smoke\configs\P2H_anti_phase_hip_disturbance__input_eid.yaml
+stepper=build\Debug\h1_controller_stepper.exe
+controller_kind=eid
+csv=data\mujoco_active_joint_check\mujoco_closed_loop_log.csv
+duration=0.2
+dt=0.002
+log_hz=500.0
+active_joints=1,2
+disturbance_enabled=True
+disturbance_joints=1
+disturbance_torques=12.0
+disturbance_window=2.5,3.0
+disturbance_ramp=0.1
+disturbance_waveform=smooth_rect
+q_rmse=0.023682066708880734
+combined_flags=0
+fatal_flags=0

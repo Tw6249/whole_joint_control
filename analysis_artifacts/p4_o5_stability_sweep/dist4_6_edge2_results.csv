@@ -1,0 +1,5 @@
+after3_dq_peak,after3_eta_u_peak,after3_q_peak,after3_rmse,diverged,flags,ko_scale_vs_o4,observer_gain_dq,observer_gain_q,out_dir,reason,returncode,win4_6_eta_u_peak,win4_6_rmse
+12.4505710041,34.9638692546,1.7074288845030001,0.5108038507735456,False,4,2.7,0.54,2.16,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge2\ko_x2p7,ok,0,0.215969769514,0.3272122169056366
+9.13279214131,14.26920983,1.729969470456,0.5384441469880822,False,4,2.705,0.541,2.164,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge2\ko_x2p705,ok,0,0.216039164517,0.32770368975687264
+14.0728529464,5.7780301848300006e+287,1.4532052055650002,0.4940694054900058,True,4,2.71,0.542,2.168,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge2\ko_x2p71,eta_u_peak_gt_100,0,0.216113749424,0.32745928798608165
+13.9867787999,2.3052828750200003e+290,1.4523897836250002,0.4928879550090695,True,4,2.715,0.543,2.172,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge2\ko_x2p715,eta_u_peak_gt_100,0,0.216180429987,0.32743302815017183

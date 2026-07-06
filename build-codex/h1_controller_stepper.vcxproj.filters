@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\twx\Documents\BaiduSyncdisk\whole_joint_control\src\controller_stepper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\twx\Documents\BaiduSyncdisk\whole_joint_control\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{FD79160F-9724-3489-8C38-52EFBC3B6DDF}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,3 @@
+joint_id,name,samples,duration_s,q_rmse,q_max_abs_error,tau_cmd_abs_max,tau_mean_abs,eid_tau_limit,flags,warning
+1,RightHipPitch,4000,,0.377349,1.219982,3.0303,0.4402,,0,
+2,RightKnee,4000,,0.198096,0.881271,0.7952,0.3936,,0,

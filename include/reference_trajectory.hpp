@@ -33,6 +33,7 @@ enum class PolicyInterpolation {
     OpenLoop,
     ClosedLoop,
     PreviewMpc,
+    PreviewMpcVelocity,
 };
 
 struct PolicyReferenceConfig {
@@ -93,6 +94,38 @@ private:
         std::vector<PolicyPoint> samples;
     };
 
+    PolicyPoint previewMpcTargetPoint(double t, double t_policy) const {
+        if (cfg_.reference_points != 3) {
+            throw std::invalid_argument("preview_mpc requires exactly 3 policy_reference_points");
+        }
+
+        std::array<double, 3> q{};
+        for (int i = 0; i < 3; ++i) {
+            q[static_cast<std::size_t>(i)] = policyPosition(t + static_cast<double>(i) * t_policy);
+        }
+
+        const double dq = (-3.0 * q[0] + 4.0 * q[1] - q[2]) / (2.0 * t_policy);
+        const double ddq = (q[0] - 2.0 * q[1] + q[2]) / (t_policy * t_policy);
+
+        return {q[0], dq, ddq};
+    }
+
+    PolicyPoint previewMpcVelocityTargetPoint(double t, double t_policy) const {
+        if (cfg_.reference_points != 4) {
+            throw std::invalid_argument("preview_mpc_velocity requires exactly 4 policy_reference_points");
+        }
+
+        std::array<double, 4> q{};
+        for (int i = 0; i < 4; ++i) {
+            q[static_cast<std::size_t>(i)] = policyPosition(t + static_cast<double>(i) * t_policy);
+        }
+
+        const double dq0 = (q[1] - q[0]) / t_policy;
+        const double dq1 = (q[2] - q[1]) / t_policy;
+        const double ddq0 = (dq1 - dq0) / t_policy;
+        return {q[0], dq0, ddq0};
+    }
+
     static double segmentIndex(double t, double t_policy) {
         return std::floor((t + 1.0e-12) / t_policy);
     }
@@ -120,6 +153,10 @@ private:
         segment.target = policyPoint(start_t, t_policy);
         if (cfg_.interpolation == PolicyInterpolation::PreviewMpc) {
             makePreviewMpcSegment(segment, t_policy, dt);
+            return segment;
+        }
+        if (cfg_.interpolation == PolicyInterpolation::PreviewMpcVelocity) {
+            makePreviewMpcVelocitySegment(segment, t_policy, dt);
             return segment;
         }
         if (cfg_.interpolation == PolicyInterpolation::ClosedLoop) {
@@ -226,10 +263,10 @@ private:
         const int policy_steps = std::max(1, static_cast<int>(std::llround(
                                                  t_policy / std::max(control_dt, 1.0e-6))));
         const double dt = t_policy / static_cast<double>(policy_steps);
-        const int preview_count = std::max(1, std::min(static_cast<int>(cfg_.reference_points), 3));
         segment.preview_mpc = true;
         segment.sample_dt = dt;
         segment.samples.clear();
+        const PolicyPoint target = previewMpcTargetPoint(segment.start_t, t_policy);
 
         if (segment.index <= 0.0) {
             segment.start = {policyPosition(0.0), 0.0, 0.0};
@@ -238,18 +275,60 @@ private:
                    !segment_.samples.empty()) {
             segment.start = segment_.samples.back();
         } else {
-            segment.start = policyPoint((segment.index - 1.0) * t_policy, t_policy);
-            segment.start.ddq = 0.0;
+            segment.start = previewMpcTargetPoint((segment.index - 1.0) * t_policy, t_policy);
         }
 
         std::vector<double> targets;
-        targets.reserve(static_cast<std::size_t>(preview_count));
-        for (int i = 0; i < preview_count; ++i) {
+        targets.reserve(3);
+        for (int i = 0; i < 3; ++i) {
             targets.push_back(policyPosition(segment.start_t + static_cast<double>(i) * t_policy));
         }
+        const bool solved = solveSoftPreviewNoTerminalMpc(segment.start, targets, policy_steps, dt, segment.samples);
 
-        if (!solvePreviewMpc(segment.start, targets, policy_steps, dt, segment.samples)) {
-            fillQuinticFallback(segment, t_policy, policy_steps);
+        if (!solved) {
+            fillQuinticFallback(segment, t_policy, policy_steps, target);
+        }
+        segment.target = segment.samples.empty() ? segment.start : segment.samples.back();
+    }
+
+    void makePreviewMpcVelocitySegment(SegmentState& segment, double t_policy, double control_dt) const {
+        const int policy_steps = std::max(1, static_cast<int>(std::llround(
+                                                 t_policy / std::max(control_dt, 1.0e-6))));
+        const double dt = t_policy / static_cast<double>(policy_steps);
+        segment.preview_mpc = true;
+        segment.sample_dt = dt;
+        segment.samples.clear();
+        const PolicyPoint target = previewMpcVelocityTargetPoint(segment.start_t, t_policy);
+
+        if (segment.index <= 0.0) {
+            segment.start = {policyPosition(0.0), 0.0, 0.0};
+        } else if (segment_.initialized && segment_.preview_mpc &&
+                   std::abs(segment_.index + 1.0 - segment.index) < 0.5 &&
+                   !segment_.samples.empty()) {
+            segment.start = segment_.samples.back();
+        } else {
+            segment.start = previewMpcVelocityTargetPoint((segment.index - 1.0) * t_policy, t_policy);
+        }
+
+        std::array<double, 4> q{};
+        for (int i = 0; i < 4; ++i) {
+            q[static_cast<std::size_t>(i)] =
+                policyPosition(segment.start_t + static_cast<double>(i) * t_policy);
+        }
+        std::vector<double> targets_q{q[0], q[1], q[2], q[3]};
+        std::vector<double> targets_dq;
+        targets_dq.reserve(3);
+        for (int i = 0; i < 3; ++i) {
+            targets_dq.push_back((q[static_cast<std::size_t>(i + 1)] -
+                                  q[static_cast<std::size_t>(i)]) /
+                                 t_policy);
+        }
+
+        const bool solved = solveSoftPreviewVelocityMpc(
+            segment.start, targets_q, targets_dq, policy_steps, dt, segment.samples);
+
+        if (!solved) {
+            fillQuinticFallback(segment, t_policy, policy_steps, target);
         }
         segment.target = segment.samples.empty() ? segment.start : segment.samples.back();
     }
@@ -278,11 +357,11 @@ private:
         };
     }
 
-    static bool solvePreviewMpc(const PolicyPoint& start,
-                                const std::vector<double>& preview_q,
-                                int policy_steps,
-                                double dt,
-                                std::vector<PolicyPoint>& first_segment) {
+    static bool solveSoftPreviewNoTerminalMpc(const PolicyPoint& start,
+                                              const std::vector<double>& preview_q,
+                                              int policy_steps,
+                                              double dt,
+                                              std::vector<PolicyPoint>& first_segment) {
         if (preview_q.empty() || policy_steps <= 0 || dt <= 0.0) {
             return false;
         }
@@ -291,8 +370,6 @@ private:
         constexpr double w_path_v = 3.0e-3;
         constexpr double w_path_a = 8.0e-5;
         constexpr double w_jerk = 2.0e-9;
-        constexpr double w_terminal_v = 2.0e-1;
-        constexpr double w_terminal_a = 2.0e-3;
         constexpr double w_ridge = 1.0e-10;
 
         const int horizon_steps = policy_steps * static_cast<int>(preview_q.size());
@@ -334,10 +411,6 @@ private:
                     qij += w_path_a * aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] *
                            aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(j)];
                 }
-                qij += w_terminal_v * av.back()[static_cast<std::size_t>(i)] *
-                       av.back()[static_cast<std::size_t>(j)];
-                qij += w_terminal_a * aa.back()[static_cast<std::size_t>(i)] *
-                       aa.back()[static_cast<std::size_t>(j)];
                 if (i == j) {
                     qij += w_jerk + w_ridge;
                 }
@@ -351,8 +424,6 @@ private:
                 ci += w_path_a * aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] *
                       ddq_base[static_cast<std::size_t>(k)];
             }
-            ci += w_terminal_v * av.back()[static_cast<std::size_t>(i)] * dq_base.back();
-            ci += w_terminal_a * aa.back()[static_cast<std::size_t>(i)] * ddq_base.back();
             c_vec[static_cast<std::size_t>(i)] = ci;
         }
 
@@ -365,6 +436,149 @@ private:
                 for (int j = 0; j < horizon_steps; ++j) {
                     q_mat[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] +=
                         w_preview_q * row[static_cast<std::size_t>(i)] * row[static_cast<std::size_t>(j)];
+                }
+            }
+        }
+
+        const auto& ce = aq[static_cast<std::size_t>(policy_steps - 1)];
+        const double be = preview_q.front() - q_base[static_cast<std::size_t>(policy_steps - 1)];
+        const int n = horizon_steps + 1;
+        std::vector<std::vector<double>> kkt(n, std::vector<double>(n, 0.0));
+        std::vector<double> rhs(n, 0.0);
+        for (int i = 0; i < horizon_steps; ++i) {
+            for (int j = 0; j < horizon_steps; ++j) {
+                kkt[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] =
+                    q_mat[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
+            }
+            kkt[static_cast<std::size_t>(i)][static_cast<std::size_t>(horizon_steps)] =
+                ce[static_cast<std::size_t>(i)];
+            kkt[static_cast<std::size_t>(horizon_steps)][static_cast<std::size_t>(i)] =
+                ce[static_cast<std::size_t>(i)];
+            rhs[static_cast<std::size_t>(i)] = -c_vec[static_cast<std::size_t>(i)];
+        }
+        rhs[static_cast<std::size_t>(horizon_steps)] = be;
+
+        std::vector<double> sol;
+        if (!solveLinearSystem(kkt, rhs, sol)) {
+            return false;
+        }
+
+        first_segment.clear();
+        first_segment.reserve(static_cast<std::size_t>(policy_steps + 1));
+        first_segment.push_back(start);
+        for (int k = 0; k < policy_steps; ++k) {
+            double q = q_base[static_cast<std::size_t>(k)];
+            double dq = dq_base[static_cast<std::size_t>(k)];
+            double ddq = ddq_base[static_cast<std::size_t>(k)];
+            for (int i = 0; i < horizon_steps; ++i) {
+                const double j = sol[static_cast<std::size_t>(i)];
+                q += aq[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] * j;
+                dq += av[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] * j;
+                ddq += aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] * j;
+            }
+            if (!std::isfinite(q) || !std::isfinite(dq) || !std::isfinite(ddq)) {
+                return false;
+            }
+            first_segment.push_back({q, dq, ddq});
+        }
+        return true;
+    }
+
+    static bool solveSoftPreviewVelocityMpc(const PolicyPoint& start,
+                                            const std::vector<double>& preview_q,
+                                            const std::vector<double>& preview_dq,
+                                            int policy_steps,
+                                            double dt,
+                                            std::vector<PolicyPoint>& first_segment) {
+        if (preview_q.size() != 4 || preview_dq.size() != 3 || policy_steps <= 0 || dt <= 0.0) {
+            return false;
+        }
+
+        constexpr double w_preview_q = 2.0e7;
+        constexpr double w_preview_v = 1.0;
+        constexpr double w_path_v = 3.0e-3;
+        constexpr double w_path_a = 8.0e-5;
+        constexpr double w_jerk = 2.0e-9;
+        constexpr double w_ridge = 1.0e-10;
+
+        constexpr int optimized_policy_points = 3;
+        const int horizon_steps = policy_steps * optimized_policy_points;
+        if (horizon_steps <= 0 || horizon_steps > 240) {
+            return false;
+        }
+
+        std::vector<std::vector<double>> aq(horizon_steps, std::vector<double>(horizon_steps, 0.0));
+        std::vector<std::vector<double>> av(horizon_steps, std::vector<double>(horizon_steps, 0.0));
+        std::vector<std::vector<double>> aa(horizon_steps, std::vector<double>(horizon_steps, 0.0));
+        for (int k = 1; k <= horizon_steps; ++k) {
+            for (int i = 0; i < k; ++i) {
+                const double r = static_cast<double>(k - i);
+                aa[static_cast<std::size_t>(k - 1)][static_cast<std::size_t>(i)] = dt;
+                av[static_cast<std::size_t>(k - 1)][static_cast<std::size_t>(i)] =
+                    0.5 * dt * dt * (r * r - (r - 1.0) * (r - 1.0));
+                aq[static_cast<std::size_t>(k - 1)][static_cast<std::size_t>(i)] =
+                    (dt * dt * dt / 6.0) * (r * r * r - (r - 1.0) * (r - 1.0) * (r - 1.0));
+            }
+        }
+
+        std::vector<double> q_base(horizon_steps, 0.0);
+        std::vector<double> dq_base(horizon_steps, 0.0);
+        std::vector<double> ddq_base(horizon_steps, start.ddq);
+        for (int k = 1; k <= horizon_steps; ++k) {
+            const double tk = dt * static_cast<double>(k);
+            q_base[static_cast<std::size_t>(k - 1)] = start.q + start.dq * tk + 0.5 * start.ddq * tk * tk;
+            dq_base[static_cast<std::size_t>(k - 1)] = start.dq + start.ddq * tk;
+        }
+
+        std::vector<std::vector<double>> q_mat(horizon_steps, std::vector<double>(horizon_steps, 0.0));
+        std::vector<double> c_vec(horizon_steps, 0.0);
+        for (int i = 0; i < horizon_steps; ++i) {
+            for (int j = 0; j < horizon_steps; ++j) {
+                double qij = 0.0;
+                for (int k = 0; k < horizon_steps; ++k) {
+                    qij += w_path_v * av[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] *
+                           av[static_cast<std::size_t>(k)][static_cast<std::size_t>(j)];
+                    qij += w_path_a * aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] *
+                           aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(j)];
+                }
+                if (i == j) {
+                    qij += w_jerk + w_ridge;
+                }
+                q_mat[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] = qij;
+            }
+
+            double ci = 0.0;
+            for (int k = 0; k < horizon_steps; ++k) {
+                ci += w_path_v * av[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] *
+                      dq_base[static_cast<std::size_t>(k)];
+                ci += w_path_a * aa[static_cast<std::size_t>(k)][static_cast<std::size_t>(i)] *
+                      ddq_base[static_cast<std::size_t>(k)];
+            }
+            c_vec[static_cast<std::size_t>(i)] = ci;
+        }
+
+        for (std::size_t p = 1; p < 3; ++p) {
+            const int row_index = static_cast<int>(p + 1) * policy_steps - 1;
+            const auto& row = aq[static_cast<std::size_t>(row_index)];
+            const double err = q_base[static_cast<std::size_t>(row_index)] - preview_q[p];
+            for (int i = 0; i < horizon_steps; ++i) {
+                c_vec[static_cast<std::size_t>(i)] += w_preview_q * row[static_cast<std::size_t>(i)] * err;
+                for (int j = 0; j < horizon_steps; ++j) {
+                    q_mat[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] +=
+                        w_preview_q * row[static_cast<std::size_t>(i)] * row[static_cast<std::size_t>(j)];
+                }
+            }
+        }
+
+        for (std::size_t p = 0; p < 3; ++p) {
+            const int row_index = static_cast<int>(p + 1) * policy_steps - 1;
+            const auto& row = av[static_cast<std::size_t>(row_index)];
+            const double err = dq_base[static_cast<std::size_t>(row_index)] - preview_dq[p];
+            for (int i = 0; i < horizon_steps; ++i) {
+                c_vec[static_cast<std::size_t>(i)] += w_preview_v * row[static_cast<std::size_t>(i)] * err;
+                for (int j = 0; j < horizon_steps; ++j) {
+                    q_mat[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] +=
+                        w_preview_v * row[static_cast<std::size_t>(i)] * row[static_cast<std::size_t>(j)];
                 }
             }
         }
@@ -461,10 +675,12 @@ private:
         return true;
     }
 
-    static void fillQuinticFallback(SegmentState& segment, double t_policy, int policy_steps) {
+    static void fillQuinticFallback(SegmentState& segment,
+                                    double t_policy,
+                                    int policy_steps,
+                                    const PolicyPoint& target) {
         segment.samples.clear();
         segment.samples.reserve(static_cast<std::size_t>(policy_steps + 1));
-        const PolicyPoint target{segment.target.q, 0.0, 0.0};
         for (int i = 0; i <= policy_steps; ++i) {
             const double tau = t_policy * static_cast<double>(i) / static_cast<double>(policy_steps);
             segment.samples.push_back(evalQuinticReference(segment.start, target, t_policy, tau));

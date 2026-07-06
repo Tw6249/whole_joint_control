@@ -1,5 +1,12 @@
 # Unitree H1 Full-Body Joint Control
 
+## 文档与结果入口
+
+- 项目结构和归档规则见 `docs/PROJECT_STRUCTURE.md`。
+- 面向阅读的文档入口见 `docs/README.md`。
+- 实验派生结果统一放在 `analysis_artifacts/`，原始日志和直接运行输出放在 `data/`。
+- 对外交付 PDF 放在 `docs/reports/`。
+
 H1 人形机器人多关节控制器开发、仿真与实机部署。
 
 ## 构建

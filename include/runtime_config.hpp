@@ -24,6 +24,13 @@ enum class ControllerKind {
     PositionPd,
 };
 
+enum class EidMode {
+    FullEid,
+    PdInverseOnly,
+    CenterFeedbackOnly,
+    InputCompensationOnly,
+};
+
 struct ControllerParams {
     int target_joint = 2;
     double kp = 260.0;
@@ -51,6 +58,8 @@ struct ControllerParams {
     double torque_safe_kd = 0.0;
     double inverse_q_weight = 0.0;
     double inverse_dq_weight = 0.0;
+    EidMode eid_mode = EidMode::FullEid;
+    double residual_eta_lambda = 1.0;
 };
 
 struct PlantModelConfig {
@@ -208,6 +217,37 @@ inline std::string controllerKindName(ControllerKind kind) {
     return "unknown";
 }
 
+inline EidMode parseEidMode(const std::string& value) {
+    const std::string token = normalizeToken(trim(value));
+    if (token == "full_eid" || token == "full" || token == "eid") {
+        return EidMode::FullEid;
+    }
+    if (token == "pd_inverse_only" || token == "pd" || token == "inverse_only") {
+        return EidMode::PdInverseOnly;
+    }
+    if (token == "center_feedback_only" || token == "center_only" || token == "center") {
+        return EidMode::CenterFeedbackOnly;
+    }
+    if (token == "input_compensation_only" || token == "input_only" || token == "compensation_only") {
+        return EidMode::InputCompensationOnly;
+    }
+    throw std::runtime_error("eid_mode must be full_eid, pd_inverse_only, center_feedback_only, or input_compensation_only");
+}
+
+inline std::string eidModeName(EidMode mode) {
+    switch (mode) {
+        case EidMode::FullEid:
+            return "full_eid";
+        case EidMode::PdInverseOnly:
+            return "pd_inverse_only";
+        case EidMode::CenterFeedbackOnly:
+            return "center_feedback_only";
+        case EidMode::InputCompensationOnly:
+            return "input_compensation_only";
+    }
+    return "unknown";
+}
+
 inline PolicyInterpolation parsePolicyInterpolation(const std::string& value) {
     const std::string token = normalizeToken(trim(value));
     if (token == "open_loop" || token == "openloop" || token == "open") {
@@ -219,7 +259,12 @@ inline PolicyInterpolation parsePolicyInterpolation(const std::string& value) {
     if (token == "preview_mpc" || token == "previewmpc" || token == "mpc") {
         return PolicyInterpolation::PreviewMpc;
     }
-    throw std::runtime_error("policy_interpolation must be open_loop, closed_loop, or preview_mpc");
+    if (token == "preview_mpc_velocity" || token == "preview_mpc_vel" ||
+        token == "previewmpcvelocity" || token == "mpc_velocity" ||
+        token == "velocity_mpc") {
+        return PolicyInterpolation::PreviewMpcVelocity;
+    }
+    throw std::runtime_error("policy_interpolation must be open_loop, closed_loop, preview_mpc, or preview_mpc_velocity");
 }
 
 inline PolicySource parsePolicySource(const std::string& value) {
@@ -263,6 +308,9 @@ inline void parseControllerParamField(ControllerParams& cfg,
     if (key == "eid_tau_slew_rate") {
         throw std::runtime_error("removed controller field 'eid_tau_slew_rate'; use tau_slew_rate");
     }
+    if (key == "policy_mpc_variant") {
+        throw std::runtime_error("removed policy field 'policy_mpc_variant'; preview_mpc now always uses the 3-ref soft-preview MPC without terminal velocity/acceleration penalty");
+    }
     if (key == "kp") cfg.kp = toDouble(value);
     else if (key == "kd") cfg.kd = toDouble(value);
     else if (key == "observer_gain_q") cfg.observer_gain_q = toDouble(value);
@@ -286,6 +334,8 @@ inline void parseControllerParamField(ControllerParams& cfg,
     else if (key == "torque_safe_kd") cfg.torque_safe_kd = toDouble(value);
     else if (key == "inverse_q_weight") cfg.inverse_q_weight = toDouble(value);
     else if (key == "inverse_dq_weight") cfg.inverse_dq_weight = toDouble(value);
+    else if (key == "eid_mode") cfg.eid_mode = parseEidMode(value);
+    else if (key == "residual_eta_lambda") cfg.residual_eta_lambda = toDouble(value);
 }
 
 inline void parsePlantField(PlantModelConfig& plant,
@@ -388,6 +438,14 @@ inline void validateCommonControllerConfig(const ControllerParams& c, const std:
         c.policy_reference_points != 4) {
         throw std::runtime_error(prefix + ".policy_reference_points must be 1, 2, 3, or 4");
     }
+    if (c.policy_interpolation == PolicyInterpolation::PreviewMpc &&
+        c.policy_reference_points != 3) {
+        throw std::runtime_error(prefix + ".policy_reference_points must be exactly 3 for preview_mpc");
+    }
+    if (c.policy_interpolation == PolicyInterpolation::PreviewMpcVelocity &&
+        c.policy_reference_points != 4) {
+        throw std::runtime_error(prefix + ".policy_reference_points must be exactly 4 for preview_mpc_velocity");
+    }
 }
 
 inline void validateEidControllerConfig(const ControllerParams& c, const std::string& prefix) {
@@ -412,8 +470,12 @@ inline void validateEidControllerConfig(const ControllerParams& c, const std::st
     }
     if (!finite(c.observer_gain_q) || !finite(c.observer_gain_dq) ||
         !finite(c.ku_q) || !finite(c.ku_dq) ||
-        !finite(c.torque_safe_kp) || !finite(c.torque_safe_kd)) {
+        !finite(c.torque_safe_kp) || !finite(c.torque_safe_kd) ||
+        !finite(c.residual_eta_lambda)) {
         throw std::runtime_error(prefix + " contains non-finite EID value");
+    }
+    if (c.residual_eta_lambda < 0.0 || c.residual_eta_lambda > 1.0) {
+        throw std::runtime_error(prefix + ".residual_eta_lambda must be in [0, 1]");
     }
 }
 

@@ -1,0 +1,22 @@
+diverged,dq_peak_after3,eta_u_peak_after3,flags,ko_scale_vs_o4,observer_gain_dq,observer_gain_q,out_dir,q_peak_after3,reason,returncode,rmse_after3,stderr_tail
+False,0.530731635697,0.00986978461947,4,3.355,0.671,2.684,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p355,0.02667302372399999,ok,0,0.013075066873146012,
+False,0.530730498004,0.00987073657098,4,3.36,0.672,2.688,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p36,0.026672376406999987,ok,0,0.01307472846803508,
+False,0.530729362007,0.00987165623803,4,3.365,0.673,2.692,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p365,0.026671730692000017,ok,0,0.013074391038141779,
+False,0.530728218876,0.00987255330087,4,3.37,0.674,2.696,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p37,0.02667108676700003,ok,0,0.013074054578157232,
+False,0.530727059497,0.00987349094882,4,3.375,0.675,2.7,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p375,0.026670444357,ok,0,0.013073719082244582,
+False,0.530725852571,0.00987497073685,4,3.38,0.676,2.704,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p38,0.02666980336300001,ok,0,0.013073384647189974,
+False,0.536365652583,0.1182640849,4,3.385,0.677,2.708,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p385,0.026633404830999963,ok,0,0.013038288684560731,
+True,,,,3.39,0.678,2.712,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p39,,process_failed_nan_or_error,1,,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+"
+True,,,,3.395,0.679,2.716,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_fine\ko_x3p395,,process_failed_nan_or_error,1,,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+"

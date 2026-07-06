@@ -1,0 +1,24 @@
+after3_dq_peak,after3_eta_u_peak,after3_q_peak,after3_rmse,diverged,flags,ko_scale_vs_o4,observer_gain_dq,observer_gain_q,out_dir,reason,returncode,stderr_tail,win4_6_eta_u_peak,win4_6_rmse
+11.3680200067,2.0139290926999998e+259,2.042863304853,0.5292523002763075,True,4,2.72,0.544,2.176,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge\ko_x2p72,eta_u_peak_gt_100,0,,0.216237970065,0.3281648734648126
+,,,,True,,2.74,0.548,2.192,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge\ko_x2p74,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,
+,,,,True,,2.76,0.5519999999999999,2.2079999999999997,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge\ko_x2p76,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,
+,,,,True,,2.78,0.5559999999999999,2.2239999999999998,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge\ko_x2p78,process_failed_nan_or_error,1,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+",,
+11.7367174122,4.76894275819e+253,1.8323570869049999,0.5159954063943839,True,4,2.79,0.558,2.232,analysis_artifacts\p4_o5_stability_sweep\runs_dist4_6_edge\ko_x2p79,eta_u_peak_gt_100,0,,0.217091415015,0.3265990497573719

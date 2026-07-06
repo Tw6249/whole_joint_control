@@ -1,0 +1,17 @@
+C++ controller closed-loop MuJoCo simulation
+scene=h1_official_mujoco\scene.xml
+config=config\h1_real_p3_selected_mpc_hip_knee_pd.yaml
+stepper=build-codex\Debug\h1_controller_stepper.exe
+controller_kind=position_pd
+csv=analysis_artifacts\selected_mpc_smoke\mujoco_closed_loop_log.csv
+duration=0.2
+dt=0.002
+active_joints=1,2
+disturbance_joints=
+disturbance_torques=
+disturbance_window=0.0,0.0
+disturbance_plateau=None,None
+log_interval_s=0.002
+q_rmse=0.00014093020103500336
+combined_flags=4
+fatal_flags=0

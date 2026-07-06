@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="500" viewBox="0 0 980 500">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="490.0" y="32.0" font-family="Arial, sans-serif" font-size="18" text-anchor="middle" font-weight="700">Aggregate comparison, lower is better</text>
+<line x1="75.0" y1="380.0" x2="935.0" y2="380.0" stroke="#222222" stroke-width="1.00"/>
+<line x1="75.0" y1="70.0" x2="75.0" y2="380.0" stroke="#222222" stroke-width="1.00"/>
+<line x1="75.0" y1="380.0" x2="935.0" y2="380.0" stroke="#dddddd" stroke-width="0.80"/>
+<text x="65.0" y="384.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="400">0</text>
+<line x1="75.0" y1="302.5" x2="935.0" y2="302.5" stroke="#dddddd" stroke-width="0.80"/>
+<text x="65.0" y="306.5" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="400">0.29</text>
+<line x1="75.0" y1="225.0" x2="935.0" y2="225.0" stroke="#dddddd" stroke-width="0.80"/>
+<text x="65.0" y="229.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="400">0.58</text>
+<line x1="75.0" y1="147.5" x2="935.0" y2="147.5" stroke="#dddddd" stroke-width="0.80"/>
+<text x="65.0" y="151.5" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="400">0.86</text>
+<line x1="75.0" y1="70.0" x2="935.0" y2="70.0" stroke="#dddddd" stroke-width="0.80"/>
+<text x="65.0" y="74.0" font-family="Arial, sans-serif" font-size="11" text-anchor="end" font-weight="400">1.2</text>
+<line x1="75.0" y1="111.0" x2="935.0" y2="111.0" stroke="#666666" stroke-width="1.00" stroke-dasharray="5 4"/>
+<rect x="101.5" y="111.0" width="40.1" height="269.0" fill="#3B82F6" stroke="none"/>
+<rect x="151.7" y="111.0" width="40.1" height="269.0" fill="#F97316" stroke="none"/>
+<text x="146.7" y="408.0" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="400">q RMSE</text>
+<rect x="244.9" y="111.0" width="40.1" height="269.0" fill="#3B82F6" stroke="none"/>
+<rect x="295.0" y="111.0" width="40.1" height="269.0" fill="#F97316" stroke="none"/>
+<text x="290.0" y="408.0" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="400">dq RMSE</text>
+<rect x="388.2" y="111.0" width="40.1" height="269.0" fill="#3B82F6" stroke="none"/>
+<rect x="438.4" y="111.7" width="40.1" height="268.3" fill="#F97316" stroke="none"/>
+<text x="433.3" y="408.0" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="400">ref ddq</text>
+<rect x="531.5" y="111.0" width="40.1" height="269.0" fill="#3B82F6" stroke="none"/>
+<rect x="581.7" y="114.7" width="40.1" height="265.3" fill="#F97316" stroke="none"/>
+<text x="576.7" y="408.0" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="400">ref jerk</text>
+<rect x="674.8" y="111.0" width="40.1" height="269.0" fill="#3B82F6" stroke="none"/>
+<rect x="725.0" y="127.3" width="40.1" height="252.7" fill="#F97316" stroke="none"/>
+<text x="720.0" y="408.0" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="400">node dq err</text>
+<rect x="818.2" y="111.0" width="40.1" height="269.0" fill="#3B82F6" stroke="none"/>
+<rect x="868.4" y="110.4" width="40.1" height="269.6" fill="#F97316" stroke="none"/>
+<text x="863.3" y="408.0" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" font-weight="400">tau rate</text>
+<rect x="105.0" y="442.0" width="18.0" height="12.0" fill="#3B82F6" stroke="none"/>
+<text x="129.0" y="452.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="400">preview_mpc_3ref</text>
+<rect x="365.0" y="442.0" width="18.0" height="12.0" fill="#F97316" stroke="none"/>
+<text x="389.0" y="452.0" font-family="Arial, sans-serif" font-size="12" text-anchor="start" font-weight="400">preview_mpc_velocity_4ref</text>
+</svg>

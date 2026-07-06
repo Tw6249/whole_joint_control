@@ -148,12 +148,19 @@ private:
 
     StepResult controllerStep(double q, double dq, const JointReferencePair& ref, double dt) {
         const auto& c = cfg_.controller;
+        const bool observer_active = c.eid_mode != EidMode::PdInverseOnly;
+        const bool use_center_eta =
+            c.eid_mode == EidMode::FullEid || c.eid_mode == EidMode::CenterFeedbackOnly;
+        const bool use_input_eta =
+            c.eid_mode == EidMode::FullEid || c.eid_mode == EidMode::InputCompensationOnly;
         const double eta_q = eta_q_;
         const double eta_dq = eta_dq_;
         const double x_hat_q = x_hat_q_;
         const double x_hat_dq = x_hat_dq_;
-        const double x_bar_q = x_hat_q + eta_q;
-        const double x_bar_dq = x_hat_dq + eta_dq;
+        const double x_bar_q = use_center_eta ? x_hat_q + eta_q : q;
+        const double x_bar_dq = use_center_eta ? x_hat_dq + eta_dq : dq;
+        const double observer_center_q = x_hat_q + eta_q;
+        const double observer_center_dq = x_hat_dq + eta_dq;
 
         const InverseResult inv =
             analyticInverseModel(
@@ -163,7 +170,7 @@ private:
                 ref.next.dq - ref.now.dq,
                 dt);
 
-        const double eta_u = c.ku_q * eta_q + c.ku_dq * eta_dq;
+        const double eta_u = use_input_eta ? c.ku_q * eta_q + c.ku_dq * eta_dq : 0.0;
         const double u_star_comp = inv.u_star - eta_u;
 
         const double den = c.kp * c.kp + c.kd * c.kd;
@@ -177,15 +184,21 @@ private:
         const double u_raw = c.kp * e_q + c.kd * e_dq;
         const double u_t = limitTorqueCommand(u_raw, dt);
 
-        const ForwardStep pred = forwardModel(x_bar_q, x_bar_dq, u_t, dt);
-        const double tilde_x_q = q - x_bar_q;
-        const double tilde_x_dq = dq - x_bar_dq;
+        const ForwardStep pred = observer_active
+                                     ? forwardModel(observer_center_q, observer_center_dq, u_t, dt)
+                                     : forwardModel(q, dq, u_t, dt);
+        const double tilde_x_q = observer_active ? q - x_hat_q - c.residual_eta_lambda * eta_q : 0.0;
+        const double tilde_x_dq = observer_active ? dq - x_hat_dq - c.residual_eta_lambda * eta_dq : 0.0;
         const double eta_next_q =
-            c.filter_alpha * c.observer_gain_q * tilde_x_q +
-            (1.0 - c.filter_alpha) * eta_lpf_q_;
+            observer_active
+                ? c.filter_alpha * c.observer_gain_q * tilde_x_q +
+                      (1.0 - c.filter_alpha) * eta_lpf_q_
+                : 0.0;
         const double eta_next_dq =
-            c.filter_alpha * c.observer_gain_dq * tilde_x_dq +
-            (1.0 - c.filter_alpha) * eta_lpf_dq_;
+            observer_active
+                ? c.filter_alpha * c.observer_gain_dq * tilde_x_dq +
+                      (1.0 - c.filter_alpha) * eta_lpf_dq_
+                : 0.0;
 
         StepResult out;
         out.u_star = inv.u_star;

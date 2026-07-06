@@ -1,0 +1,19 @@
+C++ controller closed-loop MuJoCo simulation
+scene=h1_official_mujoco\scene.xml
+config=config\h1_hip_knee_dual_tuned.yaml
+stepper=build\Debug\h1_controller_stepper.exe
+controller_kind=eid
+csv=data\mujoco_protocol_smoke\mujoco_closed_loop_log.csv
+duration=0.1
+dt=0.002
+log_hz=every_step
+active_joints=0,1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,17,18,19
+disturbance_enabled=True
+disturbance_joints=1
+disturbance_torques=1.0
+disturbance_window=0.02,0.08
+disturbance_ramp=0.01
+disturbance_waveform=smooth_rect
+q_rmse=0.2100873459116467
+combined_flags=0
+fatal_flags=0

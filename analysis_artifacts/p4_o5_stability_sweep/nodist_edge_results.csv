@@ -1,0 +1,11 @@
+diverged,eta_u_peak_after3,flags,ko_scale_vs_o4,observer_gain_dq,observer_gain_q,out_dir,q_peak_after3,reason,returncode,rmse_after3,stderr_tail
+False,2.91011032818,4,3.386,0.6772,2.7088,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_edge\ko_x3p386,0.0897069347598,ok,0,0.02314162302598926,
+True,2.0853441135e+26,4,3.387,0.6774,2.7096,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_edge\ko_x3p387,0.8831983579320001,q_error_peak_gt_0p5,0,0.16256886565124812,
+True,2.4694138787900002e+253,4,3.388,0.6776,2.7104,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_edge\ko_x3p388,1.2158823150120002,q_error_peak_gt_0p5,0,0.3782652081778193,
+True,,,3.389,0.6778,2.7112,analysis_artifacts\p4_o5_stability_sweep\runs_nodist_edge\ko_x3p389,,process_failed_nan_or_error,1,,"int_control\scripts\run_mujoco.py"", line 419, in run_simulation
+    command = send_state(proc, step, t, args.dt, data, info)
+  File ""C:\Users\TanWei\Desktop\whole_joint_control\scripts\run_mujoco.py"", line 298, in send_state
+    values = [float(x) for x in parts[1:]]
+              ~~~~~^^^
+ValueError: could not convert string to float: '-nan(ind)'
+"

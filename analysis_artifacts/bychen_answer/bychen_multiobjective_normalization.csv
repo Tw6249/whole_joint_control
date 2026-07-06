@@ -1,0 +1,7 @@
+metric,normalization_scale
+hip_rmse_rad_mean,0.0631260542403866
+knee_rmse_rad_mean,0.0452414624962113
+coord_rmse_rad_mean,0.106925865380542
+mean_tau_est_rms,2.2385906158873925
+mean_delta_tau_est_rms,0.5034980007907754
+mean_eta_u_rms,0.04407881203582485

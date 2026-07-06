@@ -1,0 +1,15 @@
+C++ controller closed-loop MuJoCo simulation
+scene=h1_official_mujoco\scene.xml
+config=analysis_artifacts\p4_ku_stability_sweep\configs\p4_ku_x16_ko_0p9_0p225.yaml
+stepper=build\Debug\h1_controller_stepper.exe
+controller_kind=eid
+csv=analysis_artifacts\p4_ku_stability_sweep\runs_dist4_6_coarse\ku_x16\mujoco_closed_loop_log.csv
+duration=10.0
+dt=0.002
+active_joints=1,2
+disturbance_joints=1
+disturbance_torques=18.0
+disturbance_window=4.0,6.0
+q_rmse=0.449614374140556
+combined_flags=4
+fatal_flags=0

@@ -19,8 +19,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import test_preview_mpc_interpolation as preview_mpc
-
 
 HIP = 1
 KNEE = 2
@@ -343,113 +341,9 @@ def plot_state_tracking_g0_g1(base_dir: Path, out_dir: Path) -> None:
     save_all(fig, out_dir / "paper_state_tracking_g0_g1")
 
 
-def plot_preview_mpc(preview_metrics_path: Path, out_dir: Path) -> None:
-    metrics = pd.read_csv(preview_metrics_path)
-    scenarios = ["smooth_sine", "multi_reversal", "step_hold"]
-    scenario_labels = ["smooth\nsine", "multi\nreversal", "step\nhold"]
-    methods = ["quintic_stop", "mpc_1", "mpc_2", "mpc_3"]
-    labels = ["quintic\nstop", "MPC\n1 point", "MPC\n2 points", "MPC\n3 points"]
-    colors = ["#7F7F7F", "#E69F00", "#0072B2", "#009E73"]
-    specs = [
-        ("ddq_rms", r"Normalized acceleration RMS"),
-        ("jerk_rms", r"Normalized jerk RMS"),
-    ]
-    x = np.arange(len(scenarios))
-    width = 0.18
-    fig, axes = plt.subplots(1, 2, figsize=(6.85, 2.35), sharey=True)
-    for ax, (metric, ylabel) in zip(axes, specs):
-        for idx, method in enumerate(methods):
-            values = []
-            for scenario in scenarios:
-                sub = metrics[metrics["scenario"] == scenario].set_index("method")
-                values.append(sub.loc[method, metric] / sub.loc["quintic_stop", metric])
-            ax.bar(
-                x + (idx - 1.5) * width,
-                values,
-                width=width,
-                color=colors[idx],
-                label=labels[idx],
-                edgecolor="black",
-                linewidth=0.35,
-            )
-        ax.axhline(1.0, color="black", linewidth=0.7, linestyle=(0, (3, 2)))
-        ax.set_xticks(x)
-        ax.set_xticklabels(scenario_labels)
-        ax.set_yscale("log")
-        ax.set_ylim(0.02, 1.35)
-        ax.set_ylabel(ylabel)
-        ax.tick_params(axis="x", length=0)
-    axes[0].text(-0.15, 1.05, "(a)", transform=axes[0].transAxes, fontweight="bold")
-    axes[1].text(-0.15, 1.05, "(b)", transform=axes[1].transAxes, fontweight="bold")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=4, frameon=False, bbox_to_anchor=(0.5, 1.08))
-    fig.subplots_adjust(top=0.76, bottom=0.22, left=0.09, right=0.98, wspace=0.30)
-    save_all(fig, out_dir / "paper_preview_mpc_summary")
-
-
-def plot_preview_mpc_timeseries(out_dir: Path) -> None:
-    cfg = preview_mpc.ExperimentConfig()
-    results = preview_mpc.run_all(cfg)
-    colors = {
-        "quintic_stop": "#7F7F7F",
-        "mpc_1": "#E69F00",
-        "mpc_2": "#0072B2",
-        "mpc_3": "#009E73",
-    }
-    labels = {
-        "quintic_stop": "quintic stop",
-        "mpc_1": "MPC 1 point",
-        "mpc_2": "MPC 2 points",
-        "mpc_3": "MPC 3 points",
-    }
-    scenario_labels = {
-        "smooth_sine": "smooth sine",
-        "multi_reversal": "multi reversal",
-        "step_hold": "step hold",
-    }
-    fig, axes = plt.subplots(3, 3, figsize=(6.85, 5.35), sharex=True)
-    fields = [("q", r"$q$ [rad]"), ("dq", r"$\dot q$ [rad/s]"), ("ddq", r"$\ddot q$ [rad/s$^2$]")]
-    for row, scenario in enumerate(["smooth_sine", "multi_reversal", "step_hold"]):
-        target = preview_mpc.SCENARIOS[scenario]
-        methods = results[scenario]
-        t_ref = next(iter(methods.values())).t
-        policy_t = np.arange(0.0, cfg.duration + cfg.policy_dt * 0.5, cfg.policy_dt)
-        policy_q = np.asarray(target(policy_t), dtype=float)
-        for col, (field, ylabel) in enumerate(fields):
-            ax = axes[row, col]
-            if field == "q":
-                ax.plot(t_ref, np.asarray(target(t_ref), dtype=float), color="black", linewidth=1.0)
-                ax.scatter(policy_t, policy_q, s=6, color="black", zorder=3, linewidths=0.0)
-            for method, traj in methods.items():
-                ax.plot(
-                    traj.t,
-                    getattr(traj, field),
-                    color=colors[method],
-                    linestyle=(0, (4, 2)) if method == "quintic_stop" else "solid",
-                    linewidth=0.9,
-                    label=labels[method] if row == 0 and col == 0 else None,
-                )
-            if row == 0:
-                ax.set_title(["Position", "Velocity", "Acceleration"][col])
-            if col == 0:
-                ax.set_ylabel(f"{scenario_labels[scenario]}\n{ylabel}")
-            else:
-                ax.set_ylabel(ylabel)
-            if row == 2:
-                ax.set_xlabel("time [s]")
-    axes[0, 0].text(-0.25, 1.11, "(a)", transform=axes[0, 0].transAxes, fontweight="bold")
-    axes[0, 1].text(-0.25, 1.11, "(b)", transform=axes[0, 1].transAxes, fontweight="bold")
-    axes[0, 2].text(-0.25, 1.11, "(c)", transform=axes[0, 2].transAxes, fontweight="bold")
-    handles, labels_out = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handles, labels_out, loc="upper center", ncol=4, frameon=False, bbox_to_anchor=(0.55, 1.02))
-    fig.subplots_adjust(top=0.89, bottom=0.08, left=0.10, right=0.99, hspace=0.52, wspace=0.42)
-    save_all(fig, out_dir / "paper_preview_mpc_timeseries")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hip-knee-dir", type=Path, default=Path("analysis_artifacts/hip_knee_domain_experiment"))
-    parser.add_argument("--preview-dir", type=Path, default=Path("analysis_artifacts/preview_mpc_interpolation"))
     parser.add_argument("--out-dir", type=Path, default=Path("analysis_artifacts/hip_knee_domain_experiment/figures_publication"))
     args = parser.parse_args()
 
@@ -460,8 +354,6 @@ def main() -> int:
     plot_state_tracking_g0_g1(args.hip_knee_dir, args.out_dir)
     plot_state_tracking_timeseries(args.hip_knee_dir, args.out_dir)
     plot_closed_loop_evidence(args.hip_knee_dir, args.out_dir)
-    plot_preview_mpc(args.preview_dir / "preview_mpc_metrics.csv", args.out_dir)
-    plot_preview_mpc_timeseries(args.out_dir)
     print(f"figures={args.out_dir}")
     return 0
 
