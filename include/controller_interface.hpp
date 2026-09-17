@@ -8,7 +8,7 @@ namespace h1if {
 
 constexpr int kMaxMotors = 20;
 constexpr int kDebugSize = 128;
-constexpr int kJointDebugSize = 33;
+constexpr int kJointDebugSize = 40;
 
 struct JointState {
     double q = 0.0;
@@ -48,6 +48,10 @@ struct RobotCommand {
 
 struct JointDebug {
     std::array<double, kJointDebugSize> data{};
+    double mpc_solve_s = 0.0;
+    std::uint32_t mpc_solve_ran = 0;
+    std::uint32_t mpc_solve_success = 0;
+    std::uint32_t mpc_solve_kind = 0;
     std::uint32_t flags = 0;
 };
 

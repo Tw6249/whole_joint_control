@@ -67,7 +67,7 @@ void stepPlant(const h1if::PlantModelConfig& model, const h1if::JointCommand& cm
 
 int main(int argc, char** argv) {
     try {
-        const std::string config_path = argc >= 2 ? argv[1] : "config/h1_full_body_mujoco_fit.yaml";
+        const std::string config_path = argc >= 2 ? argv[1] : "config/simulation/h1_full_body_mujoco_fit.yaml";
         h1if::RuntimeConfig cfg = h1if::loadRuntimeConfig(config_path);
         if (argc >= 3) {
             cfg.mock_duration = std::atof(argv[2]);

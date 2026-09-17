@@ -26,6 +26,10 @@ struct LogSample {
     double t = 0.0;
     double dt = 0.0;
     double lowstate_age = 0.0;
+    double mpc_solve_s = 0.0;
+    std::uint32_t mpc_solve_ran = 0;
+    std::uint32_t mpc_solve_success = 0;
+    std::uint32_t mpc_solve_kind = 0;
     int joint_id = 0;
     JointState measured;
     JointCommand command;
@@ -125,7 +129,8 @@ private:
     void writeHeader() {
         out_ << "experiment_id,condition_id,repeat_id,disturbance_target,disturbance_method,"
              << "config_path,log_path,"
-             << "cycle,t,dt,lowstate_age,joint_id,q,dq,tau_est,"
+             << "cycle,t,dt,lowstate_age,mpc_solve_s,mpc_solve_ran,mpc_solve_success,mpc_solve_kind,"
+             << "joint_id,q,dq,tau_est,"
              << "q_cmd,dq_cmd,kp_cmd,kd_cmd,tau_cmd,flags";
         for (int i = 0; i < static_cast<int>(LogSample{}.debug.size()); ++i) {
             out_ << ",debug_" << i;
@@ -154,6 +159,10 @@ private:
              << s.t << ','
              << s.dt << ','
              << s.lowstate_age << ','
+             << s.mpc_solve_s << ','
+             << s.mpc_solve_ran << ','
+             << s.mpc_solve_success << ','
+             << s.mpc_solve_kind << ','
              << s.joint_id << ','
              << s.measured.q << ','
              << s.measured.dq << ','

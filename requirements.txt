@@ -1,0 +1,9 @@
+# Python 3.10+; simulation, analysis and report generation.
+# Versions are intentionally unpinned; this is not a historical environment lock.
+numpy
+mujoco
+PyYAML
+pandas
+scipy
+matplotlib
+Pillow

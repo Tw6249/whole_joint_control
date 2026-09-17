@@ -1,11 +1,12 @@
 # Unitree H1 Full-Body Joint Control
 
-## 文档与结果入口
+## 文档入口
 
-- 项目结构和归档规则见 `docs/PROJECT_STRUCTURE.md`。
-- 面向阅读的文档入口见 `docs/README.md`。
-- 实验派生结果统一放在 `analysis_artifacts/`，原始日志和直接运行输出放在 `data/`。
-- 对外交付 PDF 放在 `docs/reports/`。
+- 纯代码版本的模块说明见 `docs/CODE_STRUCTURE.md`。
+- 算法和仿真说明见 [文档索引](docs/README.md)。
+- 实验入口与配置对应关系见 [实验索引](experiments/README.md)。
+- Python、SDK 和 LibTorch 安装见 [环境依赖](docs/DEPENDENCIES.md)。
+- 整理前后的路径对应见 [迁移说明](docs/REORGANIZATION.md)。
 
 H1 人形机器人多关节控制器开发、仿真与实机部署。
 
@@ -17,18 +18,18 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-## 配置
+## 配置与控制器
 
 核心配置文件：
 
 | 文件 | 用途 |
 |------|------|
-| `config/h1_full_body_mujoco_fit.yaml` | MuJoCo / mock / 实机共用 |
+| `config/simulation/h1_full_body_mujoco_fit.yaml` | MuJoCo / mock / 实机共用 |
 
 重新拟合 MuJoCo 参数：
 
 ```powershell
-python scripts/fit_mujoco_eid_params.py
+python scripts/simulation/fit_mujoco_eid_params.py
 ```
 
 ### 控制器类型
@@ -77,9 +78,7 @@ policy source -> policy point -> policy-period interpolation -> control referenc
 ### MuJoCo
 
 ```powershell
-python scripts/run_mujoco.py \
-    --config config/h1_full_body_mujoco_fit.yaml \
-    --duration 10.0 --export-summary
+python scripts/simulation/run_mujoco.py --config config/simulation/h1_full_body_mujoco_fit.yaml --duration 10.0 --export-summary
 ```
 
 Python 只做 MuJoCo 物理、stepper 通信和输出。控制算法由 C++ stepper 执行，YAML 中 `controller.kind` 选择控制器。
@@ -87,40 +86,35 @@ Python 只做 MuJoCo 物理、stepper 通信和输出。控制算法由 C++ step
 输出（`--out-dir` 目录下）：
 - `mujoco_closed_loop_log.csv` — 逐帧日志
 - `summary.csv` — 每关节汇总指标
-- `mujoco_closed_loop.mp4` — 渲染视频
+
+视频由 `scripts/simulation/render_mujoco_joint_video.py` 单独渲染。
 
 ### Mock 快速验证
 
 ```powershell
-.\build\Debug\h1_mock_closed_loop.exe config/h1_full_body_mujoco_fit.yaml 5.0
+.\build\Debug\h1_mock_closed_loop.exe config/simulation/h1_full_body_mujoco_fit.yaml 5.0
 ```
 
 用 YAML 中的 plant 近似模型跑 C++ 控制器，不启动 MuJoCo。
 
 ## 代码结构
 
-```
-include/
-  controller_factory.hpp      控制器工厂
-  eid_controller.hpp          多关节 EID
-  position_pd_controller.hpp  多关节位置 PD
-  reference_trajectory.hpp    Policy reference 插值器
-  runtime_config.hpp          YAML 配置解析
-  safety.hpp                  SafeHold、限幅、安全检查
-
-src/
-  controller_stepper.cpp      C++ stepper（stdin/stdout 与 Python 通信）
-  mock_closed_loop.cpp        本地 mock 闭环
-  main_h1_direct.cpp          实机 EID 入口
-  main_h1_knee_pid.cpp        实机单关节 PID bring-up
-  subscribe_knee_state.cpp    实机只读状态检查
-
-scripts/
-  run_mujoco.py               MuJoCo 仿真
-  fit_mujoco_eid_params.py    拟合 plant 参数
-
-tests/
-  test_safety.cpp             安全层、配置、policy reference 回归测试
+```text
+include/                    C++ 控制器、配置、参考生成和安全层
+src/                        C++ stepper、mock 与实机程序入口
+tests/                      现有 C++ 回归测试
+config/simulation/          通用仿真配置
+config/hardware/            实机单关节 bring-up 配置
+config/policy/              在线策略部署参数
+scripts/simulation/         MuJoCo、参数拟合和视频渲染
+scripts/analysis/           通用数据分析
+scripts/reporting/          绘图、报告及图片引用检查
+scripts/hardware/           实机力矩测试工具
+experiments/                按主题归档的实验脚本和 configs
+models/mujoco/h1/           H1 模型、网格与许可证
+models/policies/            TorchScript 模型及说明
+reference/matlab/           MATLAB 参考实现
+docs/                      算法、结构和环境说明
 ```
 
 控制关节：0-8, 10-19（共 19 个）。关节 9 是 MJCF 占位，不参与控制。
@@ -143,7 +137,7 @@ cmake --build build-h1 -j
 **1. 只读检查**
 
 ```bash
-./build-h1/h1_knee_state config/h1_full_body_mujoco_fit.yaml
+./build-h1/h1_knee_state config/simulation/h1_full_body_mujoco_fit.yaml
 ```
 
 确认 joint_id、q 方向、lowstate_age 正常。
@@ -151,14 +145,14 @@ cmake --build build-h1 -j
 **2. 单关节 PID bring-up**
 
 ```bash
-sudo ./build-h1/h1_knee_pid config/h1_full_body_mujoco_fit.yaml 0.55 8 --arm \
+sudo ./build-h1/h1_knee_pid config/simulation/h1_full_body_mujoco_fit.yaml 0.55 8 --arm \
     --kp 30 --ki 1 --kd 3 --tau-limit 12 --speed 0.15
 ```
 
 **3. 多关节 EID**
 
 ```bash
-sudo ./build-h1/h1_direct config/h1_full_body_mujoco_fit.yaml
+sudo ./build-h1/h1_direct config/simulation/h1_full_body_mujoco_fit.yaml
 ```
 
 ## 上机检查单
@@ -174,3 +168,4 @@ sudo ./build-h1/h1_direct config/h1_full_body_mujoco_fit.yaml
 [ ] MuJoCo 通过不代表实机可直接大幅度运行
 ```
 
+> 2026-09-17 远端同步：已补回原仓库跟踪的历史产物；当前 Git 状态、历史路径和子模块引用说明见 [远端同步记录](docs/REMOTE_SYNC.md)。

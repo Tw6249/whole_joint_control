@@ -38,6 +38,7 @@ struct SafetyConfig {
     // triggers safe-hold. Set to a value larger than any physically possible
     // speed to disable this check.
     double measured_speed_trip = 8.0;
+    std::array<double, kMaxMotors> measured_speed_trip_override{};
 
     // Hard trip: measured joint position jump (rad) between two consecutive
     // cycles above this value triggers safe-hold. Guards against sensor
@@ -48,6 +49,16 @@ struct SafetyConfig {
     // safe-hold. Protects against scheduler jitter or thread starvation.
     double max_control_dt = 0.010;
 };
+
+inline double measuredSpeedTripForJoint(const SafetyConfig& cfg, int joint_id) {
+    if (joint_id >= 0 && joint_id < kMaxMotors) {
+        const double override_value = cfg.measured_speed_trip_override[static_cast<std::size_t>(joint_id)];
+        if (override_value > 0.0) {
+            return override_value;
+        }
+    }
+    return cfg.measured_speed_trip;
+}
 
 inline std::uint8_t h1MotorMode(int joint_id) {
     switch (joint_id) {

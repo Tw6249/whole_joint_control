@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace h1if {
@@ -61,9 +63,25 @@ public:
 
     void reset() {
         segment_ = {};
+        resetLastMpcSolve();
+    }
+
+    bool prepare(double dt) const {
+        if (cfg_.interpolation != PolicyInterpolation::PreviewMpc) {
+            return true;
+        }
+        if (cfg_.reference_points != 3) {
+            throw std::invalid_argument("preview_mpc requires exactly 3 policy_reference_points");
+        }
+        const double ts = std::max(dt, 1.0e-6);
+        const double t_policy = std::max(cfg_.policy_dt, ts);
+        const int policy_steps = std::max(1, static_cast<int>(std::llround(t_policy / ts)));
+        const double step_dt = t_policy / static_cast<double>(policy_steps);
+        return ensurePreviewMpcLookup(policy_steps, step_dt);
     }
 
     JointReferencePair sample(double t, double dt, double q, double dq) {
+        resetLastMpcSolve();
         const double ts = std::max(dt, 1.0e-6);
         const double t_policy = std::max(cfg_.policy_dt, ts);
         const double t_now = std::max(t, 0.0);
@@ -82,6 +100,51 @@ public:
         return out;
     }
 
+    JointReferencePair samplePreviewTargets(double t,
+                                            double dt,
+                                            double q,
+                                            double dq,
+                                            const std::array<double, 3>& preview_q) {
+        resetLastMpcSolve();
+        if (cfg_.interpolation != PolicyInterpolation::PreviewMpc || cfg_.reference_points != 3) {
+            throw std::invalid_argument("samplePreviewTargets requires preview_mpc with exactly 3 reference points");
+        }
+
+        const double ts = std::max(dt, 1.0e-6);
+        const double t_policy = std::max(cfg_.policy_dt, ts);
+        const double t_now = std::max(t, 0.0);
+
+        JointReferencePair out;
+        const double index_now = segmentIndex(t_now, t_policy);
+        const double index_next = segmentIndex(t_now + ts, t_policy);
+        ensureExternalPreviewSegment(index_now, index_now * t_policy, t_policy, ts, q, dq, preview_q);
+        out.now = evalSegment(segment_, t_now, t_policy);
+        if (index_next == index_now) {
+            out.next = evalSegment(segment_, t_now + ts, t_policy);
+        } else {
+            const SegmentState preview =
+                makeExternalPreviewSegment(index_next, index_next * t_policy, t_policy, ts, q, dq, preview_q);
+            out.next = evalSegment(preview, t_now + ts, t_policy);
+        }
+        return out;
+    }
+
+    double lastMpcSolveTimeS() const {
+        return last_mpc_solve_s_;
+    }
+
+    bool lastMpcSolveRan() const {
+        return last_mpc_solve_ran_;
+    }
+
+    bool lastMpcSolveSuccess() const {
+        return last_mpc_solve_success_;
+    }
+
+    int lastMpcSolveKind() const {
+        return last_mpc_solve_kind_;
+    }
+
 private:
     struct SegmentState {
         bool initialized = false;
@@ -93,6 +156,8 @@ private:
         PolicyPoint target;
         std::vector<PolicyPoint> samples;
     };
+
+    using PreviewMpcPhaseCoefficients = std::array<std::array<double, 6>, 3>;
 
     PolicyPoint previewMpcTargetPoint(double t, double t_policy) const {
         if (cfg_.reference_points != 3) {
@@ -145,6 +210,19 @@ private:
         segment_ = makeSegment(index, start_t, t_policy, dt, q, dq);
     }
 
+    void ensureExternalPreviewSegment(double index,
+                                      double start_t,
+                                      double t_policy,
+                                      double dt,
+                                      double q,
+                                      double dq,
+                                      const std::array<double, 3>& preview_q) {
+        if (segment_.initialized && index == segment_.index) {
+            return;
+        }
+        segment_ = makeExternalPreviewSegment(index, start_t, t_policy, dt, q, dq, preview_q);
+    }
+
     SegmentState makeSegment(double index, double start_t, double t_policy, double dt, double q, double dq) const {
         SegmentState segment;
         segment.initialized = true;
@@ -166,6 +244,52 @@ private:
         } else {
             segment.start = policyPoint((index - 1.0) * t_policy, t_policy);
         }
+        return segment;
+    }
+
+    SegmentState makeExternalPreviewSegment(double index,
+                                            double start_t,
+                                            double t_policy,
+                                            double dt_in,
+                                            double q,
+                                            double dq,
+                                            const std::array<double, 3>& preview_q) const {
+        const int policy_steps = std::max(1, static_cast<int>(std::llround(
+                                                 t_policy / std::max(dt_in, 1.0e-6))));
+        const double dt = t_policy / static_cast<double>(policy_steps);
+
+        SegmentState segment;
+        segment.initialized = true;
+        segment.preview_mpc = true;
+        segment.index = index;
+        segment.start_t = start_t;
+        segment.sample_dt = dt;
+        segment.samples.clear();
+
+        if (segment.index <= 0.0) {
+            segment.start = {q, dq, 0.0};
+        } else if (segment_.initialized && segment_.preview_mpc &&
+                   std::abs(segment_.index + 1.0 - segment.index) < 0.5 &&
+                   !segment_.samples.empty()) {
+            segment.start = segment_.samples.back();
+        } else {
+            segment.start = {q, dq, 0.0};
+        }
+
+        std::vector<double> targets(preview_q.begin(), preview_q.end());
+        const auto solve_start = std::chrono::steady_clock::now();
+        bool solved = solveSoftPreviewNoTerminalMpcLookup(segment.start, targets, policy_steps, dt, segment.samples);
+        if (!solved) {
+            solved = solveSoftPreviewNoTerminalMpc(segment.start, targets, policy_steps, dt, segment.samples);
+        }
+        const auto solve_end = std::chrono::steady_clock::now();
+        recordLastMpcSolve(1, solve_start, solve_end, solved);
+
+        if (!solved) {
+            const PolicyPoint target{preview_q[0], 0.0, 0.0};
+            fillQuinticFallback(segment, t_policy, policy_steps, target);
+        }
+        segment.target = segment.samples.empty() ? segment.start : segment.samples.back();
         return segment;
     }
 
@@ -259,6 +383,23 @@ private:
         return std::max(lo, std::min(x, hi));
     }
 
+    void resetLastMpcSolve() const {
+        last_mpc_solve_s_ = 0.0;
+        last_mpc_solve_ran_ = false;
+        last_mpc_solve_success_ = false;
+        last_mpc_solve_kind_ = 0;
+    }
+
+    void recordLastMpcSolve(int kind,
+                            std::chrono::steady_clock::time_point start,
+                            std::chrono::steady_clock::time_point end,
+                            bool success) const {
+        last_mpc_solve_s_ = std::chrono::duration<double>(end - start).count();
+        last_mpc_solve_ran_ = true;
+        last_mpc_solve_success_ = success;
+        last_mpc_solve_kind_ = kind;
+    }
+
     void makePreviewMpcSegment(SegmentState& segment, double t_policy, double control_dt) const {
         const int policy_steps = std::max(1, static_cast<int>(std::llround(
                                                  t_policy / std::max(control_dt, 1.0e-6))));
@@ -283,7 +424,13 @@ private:
         for (int i = 0; i < 3; ++i) {
             targets.push_back(policyPosition(segment.start_t + static_cast<double>(i) * t_policy));
         }
-        const bool solved = solveSoftPreviewNoTerminalMpc(segment.start, targets, policy_steps, dt, segment.samples);
+        const auto solve_start = std::chrono::steady_clock::now();
+        bool solved = solveSoftPreviewNoTerminalMpcLookup(segment.start, targets, policy_steps, dt, segment.samples);
+        if (!solved) {
+            solved = solveSoftPreviewNoTerminalMpc(segment.start, targets, policy_steps, dt, segment.samples);
+        }
+        const auto solve_end = std::chrono::steady_clock::now();
+        recordLastMpcSolve(1, solve_start, solve_end, solved);
 
         if (!solved) {
             fillQuinticFallback(segment, t_policy, policy_steps, target);
@@ -324,8 +471,11 @@ private:
                                  t_policy);
         }
 
+        const auto solve_start = std::chrono::steady_clock::now();
         const bool solved = solveSoftPreviewVelocityMpc(
             segment.start, targets_q, targets_dq, policy_steps, dt, segment.samples);
+        const auto solve_end = std::chrono::steady_clock::now();
+        recordLastMpcSolve(2, solve_start, solve_end, solved);
 
         if (!solved) {
             fillQuinticFallback(segment, t_policy, policy_steps, target);
@@ -355,6 +505,100 @@ private:
             (1.0 - alpha) * a.dq + alpha * b.dq,
             (1.0 - alpha) * a.ddq + alpha * b.ddq,
         };
+    }
+
+    bool ensurePreviewMpcLookup(int policy_steps, double dt) const {
+        if (policy_steps <= 0 || dt <= 0.0) {
+            preview_mpc_lookup_ready_ = false;
+            preview_mpc_lookup_coeffs_.clear();
+            return false;
+        }
+        if (preview_mpc_lookup_ready_ && preview_mpc_lookup_policy_steps_ == policy_steps &&
+            std::abs(preview_mpc_lookup_dt_ - dt) <= 1.0e-15) {
+            return true;
+        }
+
+        // The three-point soft-preview MPC is linear in z=[q0,dq0,ddq0,r0,r1,r2].
+        std::vector<PreviewMpcPhaseCoefficients> coeffs(
+            static_cast<std::size_t>(policy_steps + 1));
+        for (auto& phase : coeffs) {
+            for (auto& row : phase) {
+                row.fill(0.0);
+            }
+        }
+
+        for (int feature = 0; feature < 6; ++feature) {
+            PolicyPoint basis_start;
+            std::vector<double> basis_preview_q(3, 0.0);
+            if (feature == 0) {
+                basis_start.q = 1.0;
+            } else if (feature == 1) {
+                basis_start.dq = 1.0;
+            } else if (feature == 2) {
+                basis_start.ddq = 1.0;
+            } else {
+                basis_preview_q[static_cast<std::size_t>(feature - 3)] = 1.0;
+            }
+
+            std::vector<PolicyPoint> basis_samples;
+            if (!solveSoftPreviewNoTerminalMpc(
+                    basis_start, basis_preview_q, policy_steps, dt, basis_samples) ||
+                basis_samples.size() != static_cast<std::size_t>(policy_steps + 1)) {
+                preview_mpc_lookup_ready_ = false;
+                preview_mpc_lookup_coeffs_.clear();
+                return false;
+            }
+
+            for (int phase = 0; phase <= policy_steps; ++phase) {
+                const auto& sample = basis_samples[static_cast<std::size_t>(phase)];
+                coeffs[static_cast<std::size_t>(phase)][0][static_cast<std::size_t>(feature)] = sample.q;
+                coeffs[static_cast<std::size_t>(phase)][1][static_cast<std::size_t>(feature)] = sample.dq;
+                coeffs[static_cast<std::size_t>(phase)][2][static_cast<std::size_t>(feature)] = sample.ddq;
+            }
+        }
+
+        preview_mpc_lookup_policy_steps_ = policy_steps;
+        preview_mpc_lookup_dt_ = dt;
+        preview_mpc_lookup_coeffs_ = std::move(coeffs);
+        preview_mpc_lookup_ready_ = true;
+        return true;
+    }
+
+    bool solveSoftPreviewNoTerminalMpcLookup(const PolicyPoint& start,
+                                             const std::vector<double>& preview_q,
+                                             int policy_steps,
+                                             double dt,
+                                             std::vector<PolicyPoint>& first_segment) const {
+        if (preview_q.size() != 3 || !ensurePreviewMpcLookup(policy_steps, dt)) {
+            return false;
+        }
+
+        const std::array<double, 6> feature{
+            start.q,
+            start.dq,
+            start.ddq,
+            preview_q[0],
+            preview_q[1],
+            preview_q[2],
+        };
+
+        first_segment.clear();
+        first_segment.reserve(preview_mpc_lookup_coeffs_.size());
+        for (const auto& phase : preview_mpc_lookup_coeffs_) {
+            PolicyPoint sample;
+            for (std::size_t i = 0; i < feature.size(); ++i) {
+                sample.q += phase[0][i] * feature[i];
+                sample.dq += phase[1][i] * feature[i];
+                sample.ddq += phase[2][i] * feature[i];
+            }
+            if (!std::isfinite(sample.q) || !std::isfinite(sample.dq) ||
+                !std::isfinite(sample.ddq)) {
+                first_segment.clear();
+                return false;
+            }
+            first_segment.push_back(sample);
+        }
+        return first_segment.size() == static_cast<std::size_t>(policy_steps + 1);
     }
 
     static bool solveSoftPreviewNoTerminalMpc(const PolicyPoint& start,
@@ -689,6 +933,14 @@ private:
 
     PolicyReferenceConfig cfg_;
     SegmentState segment_;
+    mutable double last_mpc_solve_s_ = 0.0;
+    mutable bool last_mpc_solve_ran_ = false;
+    mutable bool last_mpc_solve_success_ = false;
+    mutable int last_mpc_solve_kind_ = 0;
+    mutable bool preview_mpc_lookup_ready_ = false;
+    mutable int preview_mpc_lookup_policy_steps_ = 0;
+    mutable double preview_mpc_lookup_dt_ = 0.0;
+    mutable std::vector<PreviewMpcPhaseCoefficients> preview_mpc_lookup_coeffs_;
 };
 
 }  // namespace h1if

@@ -30,6 +30,7 @@ public:
         dq_start_ = state.joint[j].dq;
         reference_.configure(makePolicyReferenceConfig(cfg_.controller, cfg_.has_plant ? &cfg_.plant : nullptr));
         reference_.reset();
+        (void)reference_.prepare(cfg_.controller.control_dt);
         initialized_ = true;
     }
 
@@ -53,7 +54,13 @@ public:
         c.tau = 0.0f;
         c.enable = true;
 
-        auto& jd = debug.joint[j].data;
+        auto& joint_debug = debug.joint[j];
+        joint_debug.mpc_solve_s = reference_.lastMpcSolveTimeS();
+        joint_debug.mpc_solve_ran = reference_.lastMpcSolveRan() ? 1u : 0u;
+        joint_debug.mpc_solve_success = reference_.lastMpcSolveSuccess() ? 1u : 0u;
+        joint_debug.mpc_solve_kind = static_cast<std::uint32_t>(reference_.lastMpcSolveKind());
+
+        auto& jd = joint_debug.data;
         jd[0] = ref.now.q;
         jd[1] = ref.now.dq;
         jd[2] = state.joint[j].q;

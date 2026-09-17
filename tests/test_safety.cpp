@@ -100,6 +100,10 @@ int main() {
     assert(h1if::parsePolicyInterpolation("preview_mpc") == h1if::PolicyInterpolation::PreviewMpc);
     assert(h1if::parsePolicyInterpolation("preview_mpc_velocity") ==
            h1if::PolicyInterpolation::PreviewMpcVelocity);
+    assert(h1if::parseInputCompensationGainMode("manual") ==
+           h1if::InputCompensationGainMode::Manual);
+    assert(h1if::parseInputCompensationGainMode("input_inverse_equiv") ==
+           h1if::InputCompensationGainMode::InputInverseEquivalent);
     assert(h1if::parsePolicySource("hold") == h1if::PolicySource::Hold);
     assert(h1if::parsePolicySource("sine") == h1if::PolicySource::Sine);
     assert(h1if::parsePolicySource("step") == h1if::PolicySource::Step);
@@ -235,6 +239,7 @@ int main() {
         cfg.phase_rad = -1.5707963267948966;
         cfg.reference_points = 3;
         h1if::PolicyReferenceInterpolator preview_ref(cfg);
+        assert(preview_ref.prepare(0.002));
         (void)preview_ref.sample(0.0, 0.002, 0.5, 0.0);
         (void)preview_ref.sample(0.05, 0.002, 0.5, 0.0);
         const auto boundary = preview_ref.sample(0.10, 0.002, 0.5, 0.0);
@@ -468,6 +473,8 @@ joint_limits:
     assert(runtime_cfg.controller.joints[2]->controller.observer_gain_q == 0.31);
     assert(runtime_cfg.controller.joints[2]->controller.observer_gain_dq == 0.32);
     assert(runtime_cfg.controller.joints[2]->controller.filter_alpha == 0.61);
+    assert(runtime_cfg.controller.joints[2]->controller.input_compensation_gain_mode ==
+           h1if::InputCompensationGainMode::Manual);
     assert(runtime_cfg.controller.joints[2]->controller.inverse_q_weight == 0.03);
     assert(runtime_cfg.controller.joints[2]->controller.inverse_dq_weight == 0.04);
     assert(runtime_cfg.controller.joints[2]->controller.policy_source == h1if::PolicySource::Step);
@@ -501,6 +508,244 @@ joint_limits:
         assert(cmd.joint[4].q == static_cast<float>(state.joint[4].q));
         assert(debug.joint[2].data[0] != debug.joint[5].data[0]);
     }
+
+    const std::string input_inverse_gain_config = R"YAML(
+robot: H1
+control_dt: 0.002
+controller:
+  kind: eid
+  defaults:
+    kp: 120.0
+    kd: 5.0
+    observer_gain_q: 0.8
+    observer_gain_dq: 0.2
+    ku_q: 12.0
+    ku_dq: 1.0
+    input_compensation_gain_mode: input_inverse_equiv
+    filter_alpha: 0.85
+    policy_source: sine
+    policy_dt: 0.05
+    startup_blend_duration_s: 0.0
+    tau_limit: 100.0
+    tau_slew_rate: 100.0
+  joints:
+    0:
+      name: RightHipRoll
+      enabled: true
+      plant:
+        Jeff: 1.02750478
+        b: 1.0
+        gravityA: 15.5611896
+        gravityB: -6.1597202
+        tau0: 0.0
+        q_min: -0.43
+        q_max: 0.43
+        tau_max: 200.0
+    1:
+      name: RightHipPitch
+      enabled: true
+      plant:
+        Jeff: 1.00508532
+        b: 1.0
+        gravityA: 15.7100627
+        gravityB: 2.79723089
+        tau0: 0.0
+        q_min: -3.14
+        q_max: 2.53
+        tau_max: 200.0
+    2:
+      name: RightKnee
+      enabled: true
+      plant:
+        Jeff: 0.25014840
+        b: 1.0
+        gravityA: 4.14117407
+        gravityB: -2.09365203
+        tau0: 0.0
+        q_min: -0.26
+        q_max: 2.05
+        tau_max: 300.0
+    3:
+      name: LeftHipRoll
+      enabled: true
+      plant:
+        Jeff: 1.02750478
+        b: 1.0
+        gravityA: 15.5611896
+        gravityB: 6.1597202
+        tau0: 0.0
+        q_min: -0.43
+        q_max: 0.43
+        tau_max: 200.0
+    4:
+      name: LeftHipPitch
+      enabled: true
+      plant:
+        Jeff: 1.00508532
+        b: 1.0
+        gravityA: 15.7100627
+        gravityB: 2.79723089
+        tau0: 0.0
+        q_min: -3.14
+        q_max: 2.53
+        tau_max: 200.0
+    5:
+      name: LeftKnee
+      enabled: true
+      plant:
+        Jeff: 0.25014840
+        b: 1.0
+        gravityA: 4.14117407
+        gravityB: -2.09365203
+        tau0: 0.0
+        q_min: -0.26
+        q_max: 2.05
+        tau_max: 300.0
+    7:
+      name: LeftHipYaw
+      enabled: true
+      plant:
+        Jeff: 0.266439434
+        b: 1.0
+        gravityA: 0.0
+        gravityB: 0.0
+        tau0: 0.0
+        q_min: -0.43
+        q_max: 0.43
+        tau_max: 200.0
+    8:
+      name: RightHipYaw
+      enabled: true
+      plant:
+        Jeff: 0.266439434
+        b: 1.0
+        gravityA: 0.0
+        gravityB: 0.0
+        tau0: 0.0
+        q_min: -0.43
+        q_max: 0.43
+        tau_max: 200.0
+    10:
+      name: LeftAnkle
+      enabled: true
+      tau_limit: 40.0
+      plant:
+        Jeff: 0.106072334
+        b: 1.0
+        gravityA: 0.330167365
+        gravityB: -0.146181167
+        tau0: 0.0
+        q_min: -0.87
+        q_max: 0.52
+        tau_max: 40.0
+    11:
+      name: RightAnkle
+      enabled: true
+      tau_limit: 40.0
+      plant:
+        Jeff: 0.106072334
+        b: 1.0
+        gravityA: 0.330167365
+        gravityB: -0.146181167
+        tau0: 0.0
+        q_min: -0.87
+        q_max: 0.52
+        tau_max: 40.0
+joint_limits:
+  0:
+    q_min: -0.43
+    q_max: 0.43
+    dq_max: 23.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 10.0
+  1:
+    q_min: -3.14
+    q_max: 2.53
+    dq_max: 23.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 5.0
+  2:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 5.0
+  3:
+    q_min: -0.43
+    q_max: 0.43
+    dq_max: 23.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 10.0
+  4:
+    q_min: -3.14
+    q_max: 2.53
+    dq_max: 23.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 5.0
+  5:
+    q_min: -0.26
+    q_max: 2.05
+    dq_max: 14.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 5.0
+  7:
+    q_min: -0.43
+    q_max: 0.43
+    dq_max: 23.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 5.0
+  8:
+    q_min: -0.43
+    q_max: 0.43
+    dq_max: 23.0
+    tau_max: 100.0
+    kp_max: 120.0
+    kd_max: 5.0
+  10:
+    q_min: -0.87
+    q_max: 0.52
+    dq_max: 9.0
+    tau_max: 40.0
+    kp_max: 120.0
+    kd_max: 5.0
+  11:
+    q_min: -0.87
+    q_max: 0.52
+    dq_max: 9.0
+    tau_max: 40.0
+    kp_max: 120.0
+    kd_max: 5.0
+)YAML";
+    const auto input_inverse_gain_path =
+        writeTempConfig("h1if_input_inverse_gain.yaml", input_inverse_gain_config);
+    h1if::RuntimeConfig input_inverse_gain_cfg =
+        h1if::loadRuntimeConfig(input_inverse_gain_path.string());
+    const auto input_inverse_active = h1if::activeControllerJoints(input_inverse_gain_cfg);
+    assert(input_inverse_active.size() == 10);
+    for (int joint_id : input_inverse_active) {
+        const auto& joint = *input_inverse_gain_cfg.controller.joints[joint_id];
+        const auto& c = joint.controller;
+        const double g_q = c.control_dt * c.control_dt / joint.plant.Jeff;
+        const double g_dq = c.control_dt / joint.plant.Jeff;
+        const double den = g_q * g_q + g_dq * g_dq;
+        assert(std::abs(c.ku_q - c.observer_gain_q * g_q / den) < 1.0e-12);
+        assert(std::abs(c.ku_dq - c.observer_gain_dq * g_dq / den) < 1.0e-12);
+    }
+    const auto& hip_inverse = input_inverse_gain_cfg.controller.joints[1]->controller;
+    const auto& knee_inverse = input_inverse_gain_cfg.controller.joints[2]->controller;
+    assert(hip_inverse.input_compensation_gain_mode ==
+           h1if::InputCompensationGainMode::InputInverseEquivalent);
+    assert(std::abs(hip_inverse.ku_q - 0.8041) < 1.0e-4);
+    assert(std::abs(hip_inverse.ku_dq - 100.5081) < 1.0e-4);
+    assert(std::abs(knee_inverse.ku_q - 0.2001) < 1.0e-4);
+    assert(std::abs(knee_inverse.ku_dq - 25.0147) < 1.0e-4);
 
     const std::string position_pd_config = R"YAML(
 robot: H1

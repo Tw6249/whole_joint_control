@@ -22,6 +22,7 @@ namespace h1if {
 enum class ControllerKind {
     Eid,
     PositionPd,
+    OnlinePolicyEid,
 };
 
 enum class EidMode {
@@ -29,6 +30,11 @@ enum class EidMode {
     PdInverseOnly,
     CenterFeedbackOnly,
     InputCompensationOnly,
+};
+
+enum class InputCompensationGainMode {
+    Manual,
+    InputInverseEquivalent,
 };
 
 struct ControllerParams {
@@ -59,6 +65,7 @@ struct ControllerParams {
     double inverse_q_weight = 0.0;
     double inverse_dq_weight = 0.0;
     EidMode eid_mode = EidMode::FullEid;
+    InputCompensationGainMode input_compensation_gain_mode = InputCompensationGainMode::Manual;
     double residual_eta_lambda = 1.0;
 };
 
@@ -87,6 +94,17 @@ struct ControllerRuntimeConfig {
     std::array<std::optional<JointControllerConfig>, kMaxMotors> joints{};
 };
 
+struct OnlinePolicyConfig {
+    std::string deploy_yaml = "config/policy/h1.yaml";
+    std::string model_path = "models/policies/policy_lstm_1.pt";
+    std::array<double, 3> command{0.0, 0.0, 0.0};
+    double policy_dt = 0.10;
+    double phase_period_s = 1.0;
+    double max_abs_action = 4.0;
+    double initial_q_ref_tolerance = 0.35;
+    double q_ref_slew_rate = 3.0;
+};
+
 struct RuntimeConfig {
     std::string robot = "H1";
     std::string network_interface = "enp3s0";
@@ -95,6 +113,7 @@ struct RuntimeConfig {
     double mock_duration = 5.0;
     SafetyConfig safety;
     ControllerRuntimeConfig controller;
+    OnlinePolicyConfig online_policy;
     std::string log_path = "data/h1_mock_log.csv";
     std::string config_path;
     std::string experiment_id;
@@ -169,6 +188,32 @@ inline std::vector<int> parseIntList(std::string value) {
     return result;
 }
 
+inline std::vector<double> parseDoubleList(std::string value) {
+    value = trim(value);
+    if (value.size() >= 2 && value.front() == '[' && value.back() == ']') {
+        value = value.substr(1, value.size() - 2);
+    }
+
+    std::vector<double> result;
+    std::stringstream ss(value);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item = trim(item);
+        if (!item.empty()) {
+            result.push_back(toDouble(item));
+        }
+    }
+    return result;
+}
+
+inline std::array<double, 3> parseDouble3(std::string value, const std::string& label) {
+    const std::vector<double> items = parseDoubleList(value);
+    if (items.size() != 3) {
+        throw std::runtime_error(label + " must contain exactly 3 numbers");
+    }
+    return {items[0], items[1], items[2]};
+}
+
 inline bool toBool(const std::string& value) {
     std::string token = trim(value);
     for (char& ch : token) {
@@ -204,7 +249,11 @@ inline ControllerKind parseControllerKind(const std::string& value) {
     if (token == "position_pd" || token == "positionpd" || token == "pd") {
         return ControllerKind::PositionPd;
     }
-    throw std::runtime_error("controller.kind must be eid or position_pd");
+    if (token == "online_policy_eid" || token == "policy_eid" ||
+        token == "lstm_policy_eid" || token == "online_lstm_eid") {
+        return ControllerKind::OnlinePolicyEid;
+    }
+    throw std::runtime_error("controller.kind must be eid, position_pd, or online_policy_eid");
 }
 
 inline std::string controllerKindName(ControllerKind kind) {
@@ -213,6 +262,8 @@ inline std::string controllerKindName(ControllerKind kind) {
             return "eid";
         case ControllerKind::PositionPd:
             return "position_pd";
+        case ControllerKind::OnlinePolicyEid:
+            return "online_policy_eid";
     }
     return "unknown";
 }
@@ -244,6 +295,28 @@ inline std::string eidModeName(EidMode mode) {
             return "center_feedback_only";
         case EidMode::InputCompensationOnly:
             return "input_compensation_only";
+    }
+    return "unknown";
+}
+
+inline InputCompensationGainMode parseInputCompensationGainMode(const std::string& value) {
+    const std::string token = normalizeToken(trim(value));
+    if (token == "manual" || token == "configured" || token == "fixed" || token == "fixed_ku") {
+        return InputCompensationGainMode::Manual;
+    }
+    if (token == "input_inverse_equiv" || token == "input_inverse_equivalent" ||
+        token == "input_inverse" || token == "pinv" || token == "g_pinv_ko") {
+        return InputCompensationGainMode::InputInverseEquivalent;
+    }
+    throw std::runtime_error("input_compensation_gain_mode must be manual or input_inverse_equiv");
+}
+
+inline std::string inputCompensationGainModeName(InputCompensationGainMode mode) {
+    switch (mode) {
+        case InputCompensationGainMode::Manual:
+            return "manual";
+        case InputCompensationGainMode::InputInverseEquivalent:
+            return "input_inverse_equiv";
     }
     return "unknown";
 }
@@ -335,6 +408,9 @@ inline void parseControllerParamField(ControllerParams& cfg,
     else if (key == "inverse_q_weight") cfg.inverse_q_weight = toDouble(value);
     else if (key == "inverse_dq_weight") cfg.inverse_dq_weight = toDouble(value);
     else if (key == "eid_mode") cfg.eid_mode = parseEidMode(value);
+    else if (key == "input_compensation_gain_mode") {
+        cfg.input_compensation_gain_mode = parseInputCompensationGainMode(value);
+    }
     else if (key == "residual_eta_lambda") cfg.residual_eta_lambda = toDouble(value);
 }
 
@@ -409,6 +485,33 @@ inline PolicyReferenceConfig makePolicyReferenceConfig(const ControllerParams& c
                             : 0.05;
     ref.phase_rad = std::isfinite(cfg.policy_phase_rad) ? cfg.policy_phase_rad : -1.57079632679489661923;
     return ref;
+}
+
+inline void applyInputCompensationGainMode(JointControllerConfig& joint_cfg, const std::string& prefix) {
+    auto& c = joint_cfg.controller;
+    if (c.input_compensation_gain_mode == InputCompensationGainMode::Manual) {
+        return;
+    }
+    if (c.input_compensation_gain_mode != InputCompensationGainMode::InputInverseEquivalent) {
+        throw std::runtime_error(prefix + ".input_compensation_gain_mode is unsupported");
+    }
+    if (!joint_cfg.has_plant) {
+        throw std::runtime_error(prefix + ".plant is required for input_inverse_equiv input compensation gains");
+    }
+    if (c.control_dt <= 0.0 || joint_cfg.plant.Jeff <= 0.0 ||
+        !std::isfinite(c.control_dt) || !std::isfinite(joint_cfg.plant.Jeff)) {
+        throw std::runtime_error(prefix + " has invalid control_dt or plant.Jeff for input_inverse_equiv");
+    }
+
+    const double g_q = c.control_dt * c.control_dt / joint_cfg.plant.Jeff;
+    const double g_dq = c.control_dt / joint_cfg.plant.Jeff;
+    const double den = g_q * g_q + g_dq * g_dq;
+    if (den <= 1.0e-18 || !std::isfinite(den)) {
+        throw std::runtime_error(prefix + " has singular input matrix for input_inverse_equiv");
+    }
+
+    c.ku_q = c.observer_gain_q * g_q / den;
+    c.ku_dq = c.observer_gain_dq * g_dq / den;
 }
 
 inline void validateCommonControllerConfig(const ControllerParams& c, const std::string& prefix) {
@@ -499,6 +602,17 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
     if (cfg.control_dt <= 0.0 || !finite(cfg.control_dt)) {
         throw std::runtime_error("control_dt must be positive and finite");
     }
+    if (cfg.safety.measured_speed_trip <= 0.0 || !finite(cfg.safety.measured_speed_trip) ||
+        cfg.safety.measured_jump_trip <= 0.0 || !finite(cfg.safety.measured_jump_trip) ||
+        cfg.safety.lowstate_timeout <= 0.0 || !finite(cfg.safety.lowstate_timeout) ||
+        cfg.safety.max_control_dt <= 0.0 || !finite(cfg.safety.max_control_dt)) {
+        throw std::runtime_error("safe_hold timing and measured trip thresholds must be positive and finite");
+    }
+    for (double value : cfg.safety.measured_speed_trip_override) {
+        if (value < 0.0 || !finite(value)) {
+            throw std::runtime_error("safe_hold measured_speed_trip_joint_* values must be non-negative and finite");
+        }
+    }
 
     for (int i = 0; i < kMaxMotors; ++i) {
         const auto& lim = cfg.safety.limit[i];
@@ -530,9 +644,10 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
         }
 
         const auto& lim = cfg.safety.limit[joint_id];
-        if (cfg.controller.kind == ControllerKind::Eid) {
+        if (cfg.controller.kind == ControllerKind::Eid ||
+            cfg.controller.kind == ControllerKind::OnlinePolicyEid) {
             if (!jc.has_plant) {
-                throw std::runtime_error(prefix + ".plant is required for controller.kind=eid");
+                throw std::runtime_error(prefix + ".plant is required for EID controllers");
             }
             validateEidControllerConfig(jc.controller, prefix);
             validatePlantConfig(jc.plant, prefix + ".plant");
@@ -545,6 +660,24 @@ inline void validateRuntimeConfig(const RuntimeConfig& cfg) {
             if (jc.has_plant) {
                 validatePlantConfig(jc.plant, prefix + ".plant");
             }
+        }
+    }
+
+    if (cfg.controller.kind == ControllerKind::OnlinePolicyEid) {
+        if (cfg.online_policy.deploy_yaml.empty() || cfg.online_policy.model_path.empty()) {
+            throw std::runtime_error("online_policy.deploy_yaml and online_policy.model_path are required");
+        }
+        if (cfg.online_policy.policy_dt <= 0.0 ||
+            cfg.online_policy.phase_period_s <= 0.0 ||
+            cfg.online_policy.max_abs_action <= 0.0 ||
+            cfg.online_policy.initial_q_ref_tolerance <= 0.0 ||
+            cfg.online_policy.q_ref_slew_rate < 0.0 ||
+            !finite(cfg.online_policy.policy_dt) ||
+            !finite(cfg.online_policy.phase_period_s) ||
+            !finite(cfg.online_policy.max_abs_action) ||
+            !finite(cfg.online_policy.initial_q_ref_tolerance) ||
+            !finite(cfg.online_policy.q_ref_slew_rate)) {
+            throw std::runtime_error("online_policy contains invalid timing, action, tolerance, or slew values");
         }
     }
 }
@@ -643,6 +776,14 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             else if (key == "kd") cfg.safety.hold_kd = static_cast<float>(toDouble(value));
             else if (key == "lowstate_timeout") cfg.safety.lowstate_timeout = toDouble(value);
             else if (key == "measured_speed_trip") cfg.safety.measured_speed_trip = toDouble(value);
+            else if (key.rfind("measured_speed_trip_joint_", 0) == 0) {
+                const std::string joint_token = key.substr(std::string("measured_speed_trip_joint_").size());
+                const int joint_id = toInt(joint_token);
+                if (joint_id < 0 || joint_id >= kMaxMotors) {
+                    throw std::runtime_error("safe_hold." + key + " joint id is out of range");
+                }
+                cfg.safety.measured_speed_trip_override[static_cast<std::size_t>(joint_id)] = toDouble(value);
+            }
             else if (key == "measured_jump_trip") cfg.safety.measured_jump_trip = toDouble(value);
             else if (key == "max_control_dt") cfg.safety.max_control_dt = toDouble(value);
         } else if (section == "experiment") {
@@ -651,6 +792,15 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             else if (key == "repeat") cfg.repeat_id = value;
             else if (key == "disturbance_target") cfg.disturbance_target = value;
             else if (key == "disturbance_method") cfg.disturbance_method = value;
+        } else if (section == "online_policy") {
+            if (key == "deploy_yaml") cfg.online_policy.deploy_yaml = value;
+            else if (key == "model_path") cfg.online_policy.model_path = value;
+            else if (key == "command") cfg.online_policy.command = parseDouble3(value, "online_policy.command");
+            else if (key == "policy_dt") cfg.online_policy.policy_dt = toDouble(value);
+            else if (key == "phase_period_s") cfg.online_policy.phase_period_s = toDouble(value);
+            else if (key == "max_abs_action") cfg.online_policy.max_abs_action = toDouble(value);
+            else if (key == "initial_q_ref_tolerance") cfg.online_policy.initial_q_ref_tolerance = toDouble(value);
+            else if (key == "q_ref_slew_rate") cfg.online_policy.q_ref_slew_rate = toDouble(value);
         } else if (section == "controller") {
             if (indent == 2) {
                 current_controller_joint = -1;
@@ -754,6 +904,13 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& path) {
             merged.target_joint = i;
             merged.policy_max_velocity = static_cast<double>(cfg.safety.limit[i].dq_max);
             cfg.controller.joints[i]->controller = merged;
+            if ((cfg.controller.kind == ControllerKind::Eid ||
+                 cfg.controller.kind == ControllerKind::OnlinePolicyEid) &&
+                cfg.controller.joints[i]->enabled) {
+                applyInputCompensationGainMode(
+                    *cfg.controller.joints[i],
+                    "controller.joints." + std::to_string(i));
+            }
         }
     }
     validateRuntimeConfig(cfg);

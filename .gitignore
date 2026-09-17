@@ -1,6 +1,7 @@
 # Build outputs
 build-h1/
 build/
+build-*/
 cmake-build-*/
 output/
 tmp/
@@ -32,8 +33,27 @@ Makefile
 Testing/Temporary/
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
+
+# Experiment outputs and generated analysis
+data/
+analysis_artifacts/
+docs/reports/analysis/
+docs/reports/*.pdf
+docs/reports/latex/*
+!docs/reports/latex/template.tex
+docs/PROJECT_STRUCTURE.md
+docs/figures/*.png
+docs/figures/*.pdf
+docs/6.1同批实机复测矩阵实验计划.md
+docs/实物控制实验结果总结.md
+docs/实物控制实验计划.md
+docs/实物控制实验配置参数表.md
+report_20260706.txt
+新改进.md
+
 
 # OS files
 .DS_Store

@@ -528,6 +528,10 @@ private:
             sample.t = state.t;
             sample.dt = state.dt;
             sample.lowstate_age = state.lowstate_age;
+            sample.mpc_solve_s = debug.joint[j].mpc_solve_s;
+            sample.mpc_solve_ran = debug.joint[j].mpc_solve_ran;
+            sample.mpc_solve_success = debug.joint[j].mpc_solve_success;
+            sample.mpc_solve_kind = debug.joint[j].mpc_solve_kind;
             sample.joint_id = j;
             sample.measured = state.joint[j];
             sample.command = command.joint[j];
@@ -613,11 +617,18 @@ private:
                 return true;
             }
             if (target.q < lim.q_min || target.q > lim.q_max) {
-                reason = prefix + "angle exceeded configured limits";
+                reason = prefix + "angle exceeded configured limits: q=" + std::to_string(target.q) +
+                         " q_min=" + std::to_string(lim.q_min) +
+                         " q_max=" + std::to_string(lim.q_max) +
+                         " dq=" + std::to_string(target.dq) +
+                         " tau_est=" + std::to_string(target.tau_est);
                 return true;
             }
-            if (std::abs(target.dq) > cfg_.safety.measured_speed_trip) {
-                reason = prefix + "speed exceeded measured_speed_trip trip";
+            const double speed_trip = h1if::measuredSpeedTripForJoint(cfg_.safety, j);
+            if (std::abs(target.dq) > speed_trip) {
+                reason = prefix + "speed exceeded measured_speed_trip trip: dq=" +
+                         std::to_string(target.dq) +
+                         " limit=" + std::to_string(speed_trip);
                 return true;
             }
             if (have_last_q_[j] && std::abs(target.q - last_q_[j]) > cfg_.safety.measured_jump_trip) {

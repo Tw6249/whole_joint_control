@@ -1,4 +1,4 @@
-﻿# 当前保留的 MPC 方法
+# 当前保留的 MPC 方法
 
 本文描述当前工程保留的 MPC 参考生成方法。原三点方法保持不变：
 
@@ -413,8 +413,8 @@ controller:
 当前髋膝 PD 配置入口：
 
 ```text
-config/h1_real_p3_selected_mpc_hip_knee_pd.yaml
-config/h1_real_p3_velocity_mpc_hip_knee_pd.yaml
+experiments/hip_knee/configs/h1_real_p3_selected_mpc_hip_knee_pd.yaml
+experiments/hip_knee/configs/h1_real_p3_velocity_mpc_hip_knee_pd.yaml
 ```
 
 ## 7. 两种方法的 MuJoCo 对比
@@ -422,7 +422,7 @@ config/h1_real_p3_velocity_mpc_hip_knee_pd.yaml
 对比脚本：
 
 ```powershell
-python scripts\compare_mpc_velocity_variant.py --backend mujoco --duration 6.0 --warmup-s 3.2
+python experiments/hip_knee/compare_mpc_velocity_variant.py --backend mujoco --duration 6.0 --warmup-s 3.2
 ```
 
 实验条件：
@@ -466,19 +466,21 @@ python scripts\compare_mpc_velocity_variant.py --backend mujoco --duration 6.0 -
 
 ### 7.3 绘图
 
+这些图由 `experiments/hip_knee/compare_mpc_velocity_variant.py` 生成，以下保留原输出位置。
+
 总体指标比例图：
 
-![MPC 速度变体指标比例](../analysis_artifacts/mpc_velocity_compare/figures/mpc_velocity_compare_metric_ratios.svg)
+MPC 速度变体指标比例：`analysis_artifacts/mpc_velocity_compare/figures/mpc_velocity_compare_metric_ratios.svg`（实验生成文件，本代码包未附带）。
 
 参考平滑性对比：
 
-![MPC 速度变体平滑性对比](../analysis_artifacts/mpc_velocity_compare/figures/mpc_velocity_compare_smoothness.svg)
+MPC 速度变体平滑性对比：`analysis_artifacts/mpc_velocity_compare/figures/mpc_velocity_compare_smoothness.svg`（实验生成文件，本代码包未附带）。
 
 闭环跟踪时序：
 
 该图按关节分别绘制 `q tracking`、`q error`、`dq tracking` 和 `dq error`。蓝色表示三点基线 `preview_mpc_3ref`，橙红色表示四点速度参考变体 `preview_mpc_velocity_4ref`；误差面板中的蓝色圆点和橙红色菱形分别标出两种方法各自最明显的局部尖峰。为了避免两种方法尖峰重合时互相遮挡，尖峰标记做了轻微水平错位。
 
-![MPC 速度变体跟踪时序](../analysis_artifacts/mpc_velocity_compare/figures/mpc_velocity_compare_tracking_timeseries.svg)
+MPC 速度变体跟踪时序：`analysis_artifacts/mpc_velocity_compare/figures/mpc_velocity_compare_tracking_timeseries.svg`（实验生成文件，本代码包未附带）。
 
 ### 7.4 分析
 

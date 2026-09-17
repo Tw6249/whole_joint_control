@@ -18,7 +18,9 @@ class EidJointController final {
 public:
     explicit EidJointController(JointControllerConfig cfg)
         : cfg_(std::move(cfg)),
-          reference_(makePolicyReferenceConfig(cfg_.controller, &cfg_.plant)) {}
+          reference_(makePolicyReferenceConfig(cfg_.controller, &cfg_.plant)) {
+        (void)reference_.prepare(cfg_.controller.control_dt);
+    }
 
     int jointId() const {
         return cfg_.controller.target_joint;
@@ -42,6 +44,7 @@ public:
         last_tau_ = 0.0;
         reference_.configure(makePolicyReferenceConfig(cfg_.controller, &cfg_.plant));
         reference_.reset();
+        (void)reference_.prepare(cfg_.controller.control_dt);
         initialized_ = true;
     }
 
@@ -61,6 +64,77 @@ public:
         const JointReferencePair ref = ramped_ref;
         const StepResult result = controllerStep(q, dq, ref, dt);
 
+        writeStepResult(state, command, debug, raw_ref, ref, result);
+    }
+
+    void stepJointWithPreviewTargets(const RobotState& state,
+                                     RobotCommand& command,
+                                     ControllerDebug& debug,
+                                     const std::array<double, 3>& preview_q) {
+        if (!initialized_) {
+            reset(state);
+        }
+
+        const int j = jointId();
+        const double q = state.joint[j].q;
+        const double dq = state.joint[j].dq;
+        const double t = state.t - t0_;
+        const double dt = cfg_.controller.control_dt;
+
+        const JointReferencePair raw_ref = reference_.samplePreviewTargets(t, dt, q, dq, preview_q);
+        const JointReferencePair ramped_ref = shapeStartupReference(raw_ref, t, dt);
+        const JointReferencePair ref = ramped_ref;
+        const StepResult result = controllerStep(q, dq, ref, dt);
+
+        writeStepResult(state, command, debug, raw_ref, ref, result);
+    }
+
+private:
+    struct ForwardStep {
+        double q_next = 0.0;
+        double dq_next = 0.0;
+        double qacc = 0.0;
+        double tau_applied = 0.0;
+    };
+
+    struct InverseResult {
+        double u_star = 0.0;
+        double rho_q = 0.0;
+        double rho_dq = 0.0;
+    };
+
+    struct StepResult {
+        double u_star = 0.0;
+        double u_feedback = 0.0;
+        double u_t = 0.0;
+        double rho_q = 0.0;
+        double rho_dq = 0.0;
+        double eta_q = 0.0;
+        double eta_dq = 0.0;
+        double x_hat_q = 0.0;
+        double x_hat_dq = 0.0;
+        double x_bar_q = 0.0;
+        double x_bar_dq = 0.0;
+        double r_d_q = 0.0;
+        double r_d_dq = 0.0;
+        double e_q = 0.0;
+        double e_dq = 0.0;
+        double observer_qacc = 0.0;
+        double observer_tau_applied = 0.0;
+        double u_raw = 0.0;
+        double eta_u = 0.0;
+    };
+
+    void writeStepResult(const RobotState& state,
+                         RobotCommand& command,
+                         ControllerDebug& debug,
+                         const JointReferencePair& raw_ref,
+                         const JointReferencePair& ref,
+                         const StepResult& result) {
+        const int j = jointId();
+        const double q = state.joint[j].q;
+        const double dq = state.joint[j].dq;
+
         auto& c = command.joint[j];
         c.mode = h1MotorMode(j);
         c.q = static_cast<float>(q);
@@ -70,7 +144,13 @@ public:
         c.tau = static_cast<float>(result.u_t);
         c.enable = true;
 
-        auto& jd = debug.joint[j].data;
+        auto& joint_debug = debug.joint[j];
+        joint_debug.mpc_solve_s = reference_.lastMpcSolveTimeS();
+        joint_debug.mpc_solve_ran = reference_.lastMpcSolveRan() ? 1u : 0u;
+        joint_debug.mpc_solve_success = reference_.lastMpcSolveSuccess() ? 1u : 0u;
+        joint_debug.mpc_solve_kind = static_cast<std::uint32_t>(reference_.lastMpcSolveKind());
+
+        auto& jd = joint_debug.data;
         jd[0] = ref.now.q;
         jd[1] = ref.now.dq;
         jd[2] = q;
@@ -109,42 +189,6 @@ public:
             debug.data[i] = jd[i];
         }
     }
-
-private:
-    struct ForwardStep {
-        double q_next = 0.0;
-        double dq_next = 0.0;
-        double qacc = 0.0;
-        double tau_applied = 0.0;
-    };
-
-    struct InverseResult {
-        double u_star = 0.0;
-        double rho_q = 0.0;
-        double rho_dq = 0.0;
-    };
-
-    struct StepResult {
-        double u_star = 0.0;
-        double u_feedback = 0.0;
-        double u_t = 0.0;
-        double rho_q = 0.0;
-        double rho_dq = 0.0;
-        double eta_q = 0.0;
-        double eta_dq = 0.0;
-        double x_hat_q = 0.0;
-        double x_hat_dq = 0.0;
-        double x_bar_q = 0.0;
-        double x_bar_dq = 0.0;
-        double r_d_q = 0.0;
-        double r_d_dq = 0.0;
-        double e_q = 0.0;
-        double e_dq = 0.0;
-        double observer_qacc = 0.0;
-        double observer_tau_applied = 0.0;
-        double u_raw = 0.0;
-        double eta_u = 0.0;
-    };
 
     StepResult controllerStep(double q, double dq, const JointReferencePair& ref, double dt) {
         const auto& c = cfg_.controller;
