@@ -1,6 +1,6 @@
 # 文档入口
 
-本目录收纳纯代码版本的算法说明、模块说明和仿真使用说明。
+本目录收纳算法说明、模块说明、仿真使用说明及保留的历史报告。
 
 ## 常用文档
 
@@ -10,7 +10,7 @@
 - [Preview-MPC 算法说明](preview_mpc_algorithm_explainer.md)：`policy_interpolation: preview_mpc` 的简短入口说明。
 - [LaTeX 报告模板](reports/latex/template.tex)：用于生成新的实验报告，不包含具体实验内容。
 
-通用工具位于 `scripts/`，具体实验脚本和专用配置位于 `experiments/`。实验日志、分析产物和报告成品不属于代码版本，统一保留在本地工作区并由 Git 忽略。
+通用工具位于 `scripts/`，具体实验脚本和专用配置位于 `experiments/`。历史 `data/` 和 `analysis_artifacts/` 已退出 Git 跟踪，本地文件继续保留；新产物遵循忽略规则。原有已跟踪报告继续保留，不能仅凭 `.gitignore` 判断是否受版本控制。归档和恢复方式见 [清理记录](CLEANUP.md)。
 
 ## 工程入口
 

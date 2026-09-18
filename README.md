@@ -36,8 +36,10 @@ python scripts/simulation/fit_mujoco_eid_params.py
 
 ```yaml
 controller:
-  kind: eid           # eid 或 position_pd
+  kind: eid           # eid、position_pd 或 online_policy_eid
 ```
+
+`online_policy_eid` 需要启用 `H1IF_BUILD_TORCH_POLICY`，配置示例见 `experiments/landing_stand/configs/`。
 
 ### 关节配置
 
@@ -67,6 +69,8 @@ policy source -> policy point -> policy-period interpolation -> control referenc
 |----------|------|
 | `open_loop` | 从上一个 policy 点插值到当前 policy 点 |
 | `closed_loop` | 每个 policy 周期开始时读取当前 q/dq，向目标插值 |
+| `preview_mpc` | 三参考点 soft-preview MPC |
+| `preview_mpc_velocity` | 四参考点，增加差分速度目标的 MPC |
 
 最大速度默认使用对应关节的 `joint_limits.<id>.dq_max`。
 所有插值模式只把 policy source 当作离散位置点来源；即使仿真 source 是 `sine`，插值器也不会读取解析速度或解析加速度。
@@ -169,3 +173,5 @@ sudo ./build-h1/h1_direct config/simulation/h1_full_body_mujoco_fit.yaml
 ```
 
 > 2026-09-17 远端同步：已补回原仓库跟踪的历史产物；当前 Git 状态、历史路径和子模块引用说明见 [远端同步记录](docs/REMOTE_SYNC.md)。
+
+> 后续清理：已归档历史数据、移除旧构建和失效引用；当前状态见 [清理记录](docs/CLEANUP.md)。

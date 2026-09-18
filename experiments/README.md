@@ -11,4 +11,4 @@
 
 通用仿真配置在 `config/simulation/`，实机单关节 bring-up 配置在 `config/hardware/`，在线策略部署参数在 `config/policy/`；每个实机实验的专用配置在对应目录的 `configs/`。
 
-实机 `run_real_*` 入口默认 dry-run；`--help` 查看参数。整理检查只运行帮助与 dry-run，没有连接机器人。实验日志仍写入 `data/`，分析产物写入 `analysis_artifacts/`，报告写入 `docs/reports/analysis/`，均由 Git 忽略。
+实机 `run_real_*` 入口默认 dry-run；`--help` 查看参数。整理检查只运行帮助与 dry-run，没有连接机器人。实验日志仍写入 `data/`，分析产物写入 `analysis_artifacts/`，报告写入 `docs/reports/analysis/`。历史 `data/` 和 `analysis_artifacts/` 已归档并退出 Git 跟踪，本地原路径保留。已有报告仍可能被 Git 跟踪；新产物按忽略规则处理。参见 [清理记录](../docs/CLEANUP.md)。

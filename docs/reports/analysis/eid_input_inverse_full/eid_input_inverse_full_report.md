@@ -130,9 +130,9 @@ $$
 
 需要说明的是，这一组仿真测试的是“等效新增益闭环”：也就是把原控制器输入补偿通道中的 $K_u$ 替换为 $K_u^{\mathrm{new}}$。它还不是完整的 $g^+K_o(x-\hat x)$ 残差直注入控制器，但已经能回答一个关键问题：如果按输入逆给出的等效增益进入闭环，效果和原控制器相比会怎样。
 
-![MuJoCo 位置误差时间序列](../../../../analysis_artifacts/eid_input_inverse_mujoco/figures/data_direct_q_error_timeseries.png)
+MuJoCo 位置误差时间序列原图缺失，历史输出路径：`analysis_artifacts/eid_input_inverse_mujoco/figures/data_direct_q_error_timeseries.png`。本次清理未补造或替换该实验图。
 
-![MuJoCo 输入补偿时间序列](../../../../analysis_artifacts/eid_input_inverse_mujoco/figures/data_direct_eta_u_timeseries.png)
+MuJoCo 输入补偿时间序列原图缺失，历史输出路径：`analysis_artifacts/eid_input_inverse_mujoco/figures/data_direct_eta_u_timeseries.png`。本次清理未补造或替换该实验图。
 
 | MuJoCo 条件 | 关节 | 位置 RMSE | 位置变化百分比 | 速度 RMSE | 输入补偿 RMS | 补偿变化百分比 | 力矩 RMS | 力矩变化百分比 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

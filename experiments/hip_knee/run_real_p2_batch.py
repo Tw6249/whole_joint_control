@@ -20,12 +20,12 @@ if __package__ in (None, ""):
 import argparse
 import csv
 import datetime as dt
-import statistics
-import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from experiments.hip_knee import batch_common as common
+from experiments.hip_knee.batch_common import config_log_name, ensure_sudo, selected_methods, shell_join
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -91,50 +91,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def validate_args(args: argparse.Namespace) -> None:
-    if args.repeats <= 0:
-        raise SystemExit("--repeats must be positive")
-    if args.duration <= 0:
-        raise SystemExit("--duration must be positive")
-    if args.pause < 0:
-        raise SystemExit("--pause must be non-negative")
-    if args.start_index <= 0:
-        raise SystemExit("--start-index must be positive")
-    if not args.direct.exists():
-        raise SystemExit(f"h1_direct not found: {args.direct}")
-    for spec in METHODS.values():
-        if not spec.config.exists():
-            raise SystemExit(f"config not found: {spec.config}")
-
-
-def selected_methods(args: argparse.Namespace) -> list[str]:
-    if args.methods == "pd":
-        return ["pd"]
-    if args.methods == "eid":
-        return ["eid"]
-    return ["pd", "eid"]
+    common.validate_args(args, METHODS)
 
 
 def build_plan(args: argparse.Namespace) -> list[tuple[int, MethodSpec]]:
-    indices = range(args.start_index, args.start_index + args.repeats)
-    methods = selected_methods(args)
-    plan: list[tuple[int, MethodSpec]] = []
-
-    if args.order == "alternating":
-        ordered_methods = [m for m in ["pd", "eid"] if m in methods]
-        for repeat in indices:
-            for method in ordered_methods:
-                plan.append((repeat, METHODS[method]))
-    else:
-        if args.order == "pd-then-eid":
-            ordered_methods = ["pd", "eid"]
-        else:
-            ordered_methods = ["eid", "pd"]
-        for method in ordered_methods:
-            if method not in methods:
-                continue
-            for repeat in indices:
-                plan.append((repeat, METHODS[method]))
-    return plan
+    return common.build_plan(args, METHODS)
 
 
 def condition_for(args: argparse.Namespace, spec: MethodSpec) -> str:
@@ -162,18 +123,6 @@ def command_for(args: argparse.Namespace, repeat: int, spec: MethodSpec) -> list
     return cmd
 
 
-def shell_join(cmd: list[str]) -> str:
-    return " ".join(f"'{part}'" if any(c.isspace() for c in part) else part for part in cmd)
-
-
-def config_log_name(spec: MethodSpec) -> str:
-    for line in spec.config.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith("log_path:"):
-            value = line.split(":", 1)[1].strip()
-            return Path(value).name
-    raise RuntimeError(f"{spec.config} missing log_path")
-
-
 def recent_completed_log(
     args: argparse.Namespace,
     spec: MethodSpec,
@@ -181,57 +130,11 @@ def recent_completed_log(
     started_at: dt.datetime,
     expected_duration: float,
 ) -> Path | None:
-    log_name = config_log_name(spec)
-    candidates = sorted(
-        (REPO_ROOT / "data").glob(f"*/{log_name}"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
+    return common.recent_completed_log(
+        REPO_ROOT, spec, repeat, started_at, expected_duration,
+        {"condition_id": condition_for(args, spec),
+         "disturbance_target": args.target, "disturbance_method": args.disturbance_method},
     )
-    min_mtime = started_at.timestamp() - 2.0
-    expected_repeat = f"r{repeat:02d}"
-    expected_condition = condition_for(args, spec)
-
-    for path in candidates:
-        if path.stat().st_mtime < min_mtime:
-            break
-        try:
-            with path.open(newline="", encoding="utf-8") as fh:
-                reader = csv.DictReader(fh)
-                first_cycle = None
-                last_cycle = None
-                dts: list[float] = []
-                repeat_seen = ""
-                condition_seen = ""
-                target_seen = ""
-                method_seen = ""
-                rows = 0
-                for row in reader:
-                    rows += 1
-                    if rows == 1:
-                        repeat_seen = row.get("repeat_id", "")
-                        condition_seen = row.get("condition_id", "")
-                        target_seen = row.get("disturbance_target", "")
-                        method_seen = row.get("disturbance_method", "")
-                    cycle = int(row["cycle"])
-                    first_cycle = cycle if first_cycle is None else min(first_cycle, cycle)
-                    last_cycle = cycle if last_cycle is None else max(last_cycle, cycle)
-                    if len(dts) < 2000:
-                        dts.append(float(row["dt"]))
-        except Exception as exc:
-            print(f"Warning: could not inspect {path}: {exc}")
-            continue
-
-        if rows == 0 or first_cycle is None or last_cycle is None:
-            continue
-        if repeat_seen != expected_repeat or condition_seen != expected_condition:
-            continue
-        if target_seen != args.target or method_seen != args.disturbance_method:
-            continue
-        median_dt = statistics.median(dts) if dts else 0.0
-        duration = max(0, last_cycle - first_cycle) * median_dt
-        if duration >= 0.90 * expected_duration:
-            return path
-    return None
 
 
 def confirm_or_exit(args: argparse.Namespace, plan: list[tuple[int, MethodSpec]]) -> None:
@@ -258,13 +161,6 @@ def confirm_or_exit(args: argparse.Namespace, plan: list[tuple[int, MethodSpec]]
     answer = input("Type RUN_P2 to start the batch: ").strip()
     if answer != "RUN_P2":
         raise SystemExit("confirmation failed; batch not started")
-
-
-def ensure_sudo(args: argparse.Namespace) -> None:
-    if args.no_sudo or not args.execute:
-        return
-    print("Checking sudo credentials with `sudo -v`...")
-    subprocess.run(["sudo", "-v"], check=True)
 
 
 def open_manifest(args: argparse.Namespace) -> tuple[Path, csv.DictWriter, object]:
@@ -298,65 +194,15 @@ def open_manifest(args: argparse.Namespace) -> tuple[Path, csv.DictWriter, objec
 
 
 def run_batch(args: argparse.Namespace, plan: list[tuple[int, MethodSpec]]) -> Path | None:
-    if not args.execute:
-        for repeat, spec in plan:
-            print(shell_join(command_for(args, repeat, spec)))
-        return None
-
-    ensure_sudo(args)
-    manifest_path, writer, fh = open_manifest(args)
-    batch_time = dt.datetime.now().isoformat(timespec="seconds")
-    try:
-        for run_no, (repeat, spec) in enumerate(plan, start=1):
-            cmd = command_for(args, repeat, spec)
-            condition = condition_for(args, spec)
-            print(f"\n[{run_no}/{len(plan)}] {spec.method.upper()} r{repeat:02d} {condition}")
-            print(shell_join(cmd))
-            start = dt.datetime.now()
-            # h1_direct waits for Enter after printing the safety warning.
-            proc = subprocess.run(
-                cmd,
-                input="\n",
-                text=True,
-                cwd=REPO_ROOT,
-            )
-            end = dt.datetime.now()
-            status = "ok" if proc.returncode == 0 else "failed"
-            completed_log = recent_completed_log(args, spec, repeat, start, args.duration)
-            if proc.returncode == -6 and completed_log is not None:
-                status = "accepted_after_complete_abort"
-                print(
-                    "Warning: h1_direct returned -6 after a complete log was written; "
-                    f"continuing. log={completed_log}"
-                )
-            writer.writerow(
-                {
-                    "batch_time": batch_time,
-                    "target": args.target,
-                    "disturbance_method": args.disturbance_method,
-                    "method": spec.method,
-                    "repeat": f"r{repeat:02d}",
-                    "condition": condition,
-                    "config": str(spec.config.relative_to(REPO_ROOT)),
-                    "duration_s": args.duration,
-                    "pause_s": args.pause,
-                    "command": shell_join(cmd),
-                    "start_time": start.isoformat(timespec="seconds"),
-                    "end_time": end.isoformat(timespec="seconds"),
-                    "returncode": proc.returncode,
-                    "status": status,
-                    "log_path": str(completed_log.relative_to(REPO_ROOT)) if completed_log else "",
-                }
-            )
-            fh.flush()
-            if proc.returncode != 0 and status != "accepted_after_complete_abort":
-                raise SystemExit(f"run failed with return code {proc.returncode}; manifest={manifest_path}")
-            if run_no < len(plan) and args.pause > 0:
-                print(f"Pausing {args.pause:g}s before next run...")
-                time.sleep(args.pause)
-    finally:
-        fh.close()
-    return manifest_path
+    return common.run_batch(
+        args, plan, repo_root=REPO_ROOT, command_for=command_for,
+        completed_log_for=recent_completed_log, open_manifest=open_manifest,
+        metadata_for=lambda args, spec: {
+            "target": args.target, "disturbance_method": args.disturbance_method,
+            "condition": condition_for(args, spec),
+        },
+        display_suffix=lambda args, spec: " " + condition_for(args, spec),
+    )
 
 
 def main() -> None:

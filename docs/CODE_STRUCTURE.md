@@ -1,6 +1,6 @@
 # Unitree H1 控制项目代码结构
 
-本项目包括 C++ 控制核心、MuJoCo 仿真、实机接口，以及可复现的实验和分析代码。历史日志、图表和报告成品不随代码分发。
+本项目包括 C++ 控制核心、MuJoCo 仿真、实机接口，以及可复现的实验和分析代码。历史日志和分析产物已归档并退出 Git 跟踪，本地原路径保留；现有报告仍随仓库保留。详见 [清理记录](CLEANUP.md)。
 
 ## 目录职责
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | `include/` | C++ 控制器接口、EID/PD、参考轨迹、配置、安全层、日志和在线策略 |
 | `src/` | stepper、mock、实机多关节控制、PID bring-up、只读状态、力矩日志和原生运动服务入口 |
-| `tests/` | 安全、配置、参考生成等现有回归测试 |
+| `tests/` | C++ 安全、配置、参考生成回归测试，以及 Python 批处理执行与日志匹配测试 |
 | `config/` | `simulation/` 通用仿真、`hardware/` bring-up、`policy/` 策略部署 |
 | `scripts/` | `simulation/`、`analysis/`、`reporting/`、`hardware/` 通用工具 |
 | `experiments/` | 髋膝、落地站立、悬吊站立及 bychen 专题；实机实验配置与入口同组存放 |

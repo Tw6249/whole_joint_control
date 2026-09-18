@@ -14,6 +14,8 @@
 
 `run_real_p1p2_tuning.py` 用于 P1/P2 调参；`analyze_real_p61.py` 与 `plot_real_p1_timeseries.py` 提供专用分析。
 
+P1/P2 的校验、运行排序、日志匹配和执行循环共用 `batch_common.py`；各自入口保留命令行默认值、确认口令、实验元数据和 manifest 格式。
+
 ```bash
 python experiments/hip_knee/run_real_p1_batch.py --help
 python experiments/hip_knee/run_real_all_batches.py

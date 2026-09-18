@@ -26,6 +26,6 @@ Linux 对应解释器为 `.venv/bin/python`。`requirements.txt` 覆盖仿真、
 - `models/policies/`：在线策略权重，部署参数见 `config/policy/h1.yaml`。
 - `reference/matlab/eid_control.m`：MATLAB 参考实现，不参与 CMake 构建。
 
-本次整理前的 `unitree_rl_gym/` 是空目录，已移除；当前 CMake 与源码没有依赖该目录。原 `.gitmodules` 仅声明不存在的 `third_party/ruckig`，当前构建和源码没有引用，已移除该失效声明。未来引入这些外部工程时，应同时补充版本与安装步骤。
+`unitree_rl_gym` 曾在远端同步时恢复为未初始化的历史 gitlink；当前清理已移除该引用，CMake 与源码不依赖它。原 `.gitmodules` 仅声明不存在的 `third_party/ruckig`，当前构建和源码没有引用，已移除该失效声明。未来引入这些外部工程时，应同时补充版本与安装步骤。
 
 > 2026-09-17 远端同步：已补回原仓库跟踪的历史产物；当前 Git 状态、历史路径和子模块引用说明见 [远端同步记录](REMOTE_SYNC.md)。

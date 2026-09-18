@@ -2,6 +2,8 @@
 
 同步日期：2026-09-17。
 
+本文记录同步完成时的状态。后续历史数据退出跟踪、旧构建与 gitlink 清理见 [CLEANUP.md](CLEANUP.md)。
+
 - 远端：`https://github.com/Tw6249/whole_joint_control.git`。
 - 基准：`origin/main`，提交 `7d5b821`（2026-07-06，Commit full workspace update）。
 - 本地分支：`main`，跟踪 `origin/main`。
